@@ -2,10 +2,12 @@ package com.finflow.transaction_service.domain.account;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Embeddable;
+import lombok.Getter;
 
 import java.util.Objects;
 import java.util.regex.Pattern;
 
+@Getter
 @Embeddable
 public class AccountNumber {
 
@@ -33,10 +35,6 @@ public class AccountNumber {
         }
 
         this.value = value;
-    }
-
-    public String getValue() {
-        return value;
     }
 
     @Override

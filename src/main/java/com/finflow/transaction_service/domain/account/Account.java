@@ -16,14 +16,12 @@ public class Account {
     private UUID id;
 
     @Column(name = "owner_id", nullable = false)
-    @Getter
     private UUID ownerId;
 
     @Embedded
     private AccountNumber accountNumber;
 
     @Column(nullable = false, precision = 19, scale = 4)
-    @Getter
     private BigDecimal balance;
 
     @Column(nullable = false, length = 3)
