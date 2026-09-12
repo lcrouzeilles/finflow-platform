@@ -18,7 +18,7 @@ public class Owner {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    protected Owner() {
+    public Owner() {
         // Required by JPA
     }
 }
