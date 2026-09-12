@@ -6,6 +6,8 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.UUID;
+
 @RestController
 @RequestMapping("/accounts")
 public class AccountController {
@@ -28,4 +30,12 @@ public class AccountController {
 
         return AccountResponse.from(account);
     }
+
+    @GetMapping("/{accountId}")
+    public AccountResponse getAccount(@PathVariable UUID accountId) {
+        Account account = accountService.getAccount(accountId);
+
+        return AccountResponse.from(account);
+    }
+
 }

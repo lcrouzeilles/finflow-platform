@@ -2,14 +2,12 @@ package com.finflow.transaction_service.service;
 
 import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.account.AccountNumberGenerator;
-import com.finflow.transaction_service.domain.account.Owner;
+import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.OwnerNotFoundException;
 import com.finflow.transaction_service.repository.AccountRepository;
 import com.finflow.transaction_service.repository.OwnerRepository;
 import org.springframework.stereotype.Service;
 
-import javax.security.auth.login.AccountNotFoundException;
-import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -43,4 +41,10 @@ public class AccountService {
         );
         return accountRepository.save(newAccount);
     }
+
+    public Account getAccount(UUID accountId) {
+        return accountRepository.findById(accountId)
+                .orElseThrow(() -> new AccountNotFoundException(accountId));
+    }
+
 }

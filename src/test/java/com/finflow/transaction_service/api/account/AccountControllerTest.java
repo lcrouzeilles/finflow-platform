@@ -13,9 +13,13 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
+
+import java.util.UUID;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -136,6 +140,53 @@ class AccountControllerTest {
                 .andExpect(jsonPath("$.message")
                         .value("Owner not found with id: 11111111-1111-1111-1111-111111111111"))
                 .andExpect(jsonPath("$.path").value("/accounts"));
+    }
+
+    @Test
+    void shouldRetrieveAccountById() throws Exception {
+        Owner owner = ownerRepository.saveAndFlush(new Owner());
+
+        CreateAccountRequest request = new CreateAccountRequest(
+                owner.getId(),
+                "ARS"
+        );
+
+        AccountResponse createdAccount = objectMapper.readValue(
+                mockMvc.perform(
+                                post("/accounts")
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content(objectMapper.writeValueAsString(request))
+                        )
+                        .andReturn()
+                        .getResponse()
+                        .getContentAsString(),
+                AccountResponse.class
+        );
+
+        mockMvc.perform(get("/accounts/{accountId}", createdAccount.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(createdAccount.id().toString()))
+                .andExpect(jsonPath("$.ownerId").value(owner.getId().toString()))
+                .andExpect(jsonPath("$.currency").value("ARS"))
+                .andExpect(jsonPath("$.balance").value(0))
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenAccountDoesNotExist() throws Exception {
+        UUID nonexistentAccountId = UUID.fromString(
+                "22222222-2222-2222-2222-222222222222"
+        );
+
+        mockMvc.perform(get("/accounts/{accountId}", nonexistentAccountId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.error").value("Not Found"))
+                .andExpect(jsonPath("$.message")
+                        .value("Account not found with id: "
+                                + nonexistentAccountId))
+                .andExpect(jsonPath("$.path")
+                        .value("/accounts/" + nonexistentAccountId));
     }
 
 }

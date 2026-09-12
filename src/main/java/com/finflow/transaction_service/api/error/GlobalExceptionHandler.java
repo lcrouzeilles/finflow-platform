@@ -1,5 +1,6 @@
 package com.finflow.transaction_service.api.error;
 
+import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.OwnerNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -46,6 +47,22 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public ApiErrorResponse handleOwnerNotFoundException(
             OwnerNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        return new ApiErrorResponse(
+                Instant.now(),
+                HttpStatus.NOT_FOUND.value(),
+                HttpStatus.NOT_FOUND.getReasonPhrase(),
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(AccountNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ApiErrorResponse handleAccountNotFoundException(
+            AccountNotFoundException exception,
             HttpServletRequest request
     ) {
         return new ApiErrorResponse(
