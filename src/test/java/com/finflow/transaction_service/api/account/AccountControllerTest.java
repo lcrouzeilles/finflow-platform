@@ -13,8 +13,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
-
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
@@ -58,4 +58,84 @@ class AccountControllerTest {
                 .andExpect(jsonPath("$.balance").value(0))
                 .andExpect(jsonPath("$.status").value("ACTIVE"));
     }
+
+    @Test
+    void shouldRejectRequestWithoutOwnerId() throws Exception {
+        String requestBody = """
+            {
+              "currency": "ARS"
+            }
+            """;
+
+        mockMvc.perform(
+                        post("/accounts")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(requestBody)
+                )
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.ownerId").exists());
+    }
+
+    @Test
+    void shouldRejectUnsupportedCurrency() throws Exception {
+        String requestBody = """
+            {
+              "ownerId": "7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45",
+              "currency": "EUR"
+            }
+            """;
+
+        mockMvc.perform(
+                        post("/accounts")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(requestBody)
+                )
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void shouldRejectRequestWithoutCurrency() throws Exception {
+        String requestBody = """
+            {
+              "ownerId": "7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45"
+            }
+            """;
+
+        mockMvc.perform(
+                        post("/accounts")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(requestBody)
+                )
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message")
+                        .value("Request validation failed"))
+                .andExpect(jsonPath("$.path").value("/accounts"))
+                .andExpect(jsonPath("$.fieldErrors.currency")
+                        .value("must not be null"));
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenOwnerDoesNotExist() throws Exception {
+        String requestBody = """
+            {
+              "ownerId": "11111111-1111-1111-1111-111111111111",
+              "currency": "ARS"
+            }
+            """;
+
+        mockMvc.perform(
+                        post("/accounts")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(requestBody)
+                )
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.error").value("Not Found"))
+                .andExpect(jsonPath("$.message")
+                        .value("Owner not found with id: 11111111-1111-1111-1111-111111111111"))
+                .andExpect(jsonPath("$.path").value("/accounts"));
+    }
+
 }
