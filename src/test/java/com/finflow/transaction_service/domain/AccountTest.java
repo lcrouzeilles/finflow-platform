@@ -1,6 +1,10 @@
 package com.finflow.transaction_service.domain;
+import com.finflow.transaction_service.domain.account.Account;
+import com.finflow.transaction_service.domain.account.AccountNumber;
+import com.finflow.transaction_service.domain.account.AccountStatus;
 import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -9,35 +13,14 @@ class AccountTest {
     @Test
     void shouldCreateAccountWithValidValues() {
         Account account = new Account(
-                "ACC-123",
-                new BigDecimal("1000.00"),
-                "USD"
+                new AccountNumber("FF-7K4M9P2X"),
+                "USD",
+                UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
         );
 
-        assertEquals("ACC-123", account.getAccountNumber());
-        assertEquals(new BigDecimal("1000.00"), account.getBalance());
+        assertEquals("FF-7K4M9P2X", account.getAccountNumber().getValue());
         assertEquals("USD", account.getCurrency());
         assertEquals(AccountStatus.ACTIVE, account.getStatus());
-    }
-
-    @Test
-    void shouldRejectNullBalance() {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new Account("ACC-123", null, "USD")
-        );
-    }
-
-    @Test
-    void shouldRejectNegativeBalance() {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new Account(
-                        "ACC-123",
-                        new BigDecimal("-100.00"),
-                        "USD"
-                )
-        );
     }
 
     @Test
@@ -46,8 +29,8 @@ class AccountTest {
                 IllegalArgumentException.class,
                 () -> new Account(
                         null,
-                        new BigDecimal("1000.00"),
-                        "USD"
+                        "USD",
+                        UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
                 )
         );
     }
@@ -57,9 +40,9 @@ class AccountTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new Account(
-                        "   ",
-                        new BigDecimal("1000.00"),
-                        "USD"
+                        new AccountNumber("   "),
+                        "USD",
+                        UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
                 )
         );
     }
@@ -69,9 +52,9 @@ class AccountTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new Account(
-                        "ACC-123",
-                        new BigDecimal("1000.00"),
-                        null
+                        new AccountNumber("FF-7K4M9P2X"),
+                        null,
+                        UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
                 )
         );
     }
@@ -81,9 +64,9 @@ class AccountTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new Account(
-                        "ACC-123",
-                        new BigDecimal("1000.00"),
-                        "   "
+                        new AccountNumber("FF-7K4M9P2X"),
+                        "   ",
+                        UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
                 )
         );
     }
@@ -91,11 +74,11 @@ class AccountTest {
     @Test
     void shouldWithdrawAmountFromBalance() {
         Account account = new Account(
-                "ACC-123",
-                new BigDecimal("1000.00"),
-                "USD"
+                new AccountNumber("FF-7K4M9P2X"),
+                "USD",
+                UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
         );
-
+        account.deposit(new BigDecimal("1000.00"));
         account.withdraw(new BigDecimal("250.00"));
 
         assertEquals(
@@ -107,11 +90,11 @@ class AccountTest {
     @Test
     void shouldAllowWithdrawOfEntireBalance() {
         Account account = new Account(
-                "ACC-123",
-                new BigDecimal("1000.00"),
-                "USD"
+                new AccountNumber("FF-7K4M9P2X"),
+                "USD",
+                UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
         );
-
+        account.deposit(new BigDecimal("1000.00"));
         account.withdraw(new BigDecimal("1000.00"));
 
         assertTrue(
@@ -122,9 +105,9 @@ class AccountTest {
     @Test
     void shouldRejectNullWithdrawalAmount() {
         Account account = new Account(
-                "ACC-123",
-                new BigDecimal("1000.00"),
-                "USD"
+                new AccountNumber("FF-7K4M9P2X"),
+                "USD",
+                UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
         );
 
         assertThrows(
@@ -136,9 +119,9 @@ class AccountTest {
     @Test
     void shouldRejectZeroWithdrawalAmount() {
         Account account = new Account(
-                "ACC-123",
-                new BigDecimal("1000.00"),
-                "USD"
+                new AccountNumber("FF-7K4M9P2X"),
+                "USD",
+                UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
         );
 
         assertThrows(
@@ -150,9 +133,9 @@ class AccountTest {
     @Test
     void shouldRejectNegativeWithdrawalAmount() {
         Account account = new Account(
-                "ACC-123",
-                new BigDecimal("1000.00"),
-                "USD"
+                new AccountNumber("FF-7K4M9P2X"),
+                "USD",
+                UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
         );
 
         assertThrows(
@@ -164,9 +147,9 @@ class AccountTest {
     @Test
     void shouldRejectWithdrawalGreaterThanBalance() {
         Account account = new Account(
-                "ACC-123",
-                new BigDecimal("1000.00"),
-                "USD"
+                new AccountNumber("FF-7K4M9P2X"),
+                "USD",
+                UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
         );
 
         assertThrows(
@@ -178,11 +161,11 @@ class AccountTest {
     @Test
     void shouldDepositAmountIntoBalance() {
         Account account = new Account(
-                "ACC-123",
-                new BigDecimal("1000.00"),
-                "USD"
+                new AccountNumber("FF-7K4M9P2X"),
+                "USD",
+                UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
         );
-
+        account.deposit(new BigDecimal("1000.00"));
         account.deposit(new BigDecimal("250.00"));
 
         assertEquals(
@@ -194,9 +177,9 @@ class AccountTest {
     @Test
     void shouldRejectNullDepositAmount() {
         Account account = new Account(
-                "ACC-123",
-                new BigDecimal("1000.00"),
-                "USD"
+                new AccountNumber("FF-7K4M9P2X"),
+                "USD",
+                UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
         );
 
         assertThrows(
@@ -208,9 +191,9 @@ class AccountTest {
     @Test
     void shouldRejectZeroDepositAmount() {
         Account account = new Account(
-                "ACC-123",
-                new BigDecimal("1000.00"),
-                "USD"
+                new AccountNumber("FF-7K4M9P2X"),
+                "USD",
+                UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
         );
 
         assertThrows(
@@ -222,9 +205,9 @@ class AccountTest {
     @Test
     void shouldRejectNegativeDepositAmount() {
         Account account = new Account(
-                "ACC-123",
-                new BigDecimal("1000.00"),
-                "USD"
+                new AccountNumber("FF-7K4M9P2X"),
+                "USD",
+                UUID.fromString("7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45")
         );
 
         assertThrows(

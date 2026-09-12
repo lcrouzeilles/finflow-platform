@@ -1,4 +1,4 @@
-package com.finflow.transaction_service.domain;
+package com.finflow.transaction_service.domain.account;
 
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -15,10 +15,15 @@ public class Account {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(nullable = false, unique = true, length = 100)
-    private String accountNumber;
+    @Column(name = "owner_id", nullable = false)
+    @Getter
+    private UUID ownerId;
+
+    @Embedded
+    private AccountNumber accountNumber;
 
     @Column(nullable = false, precision = 19, scale = 4)
+    @Getter
     private BigDecimal balance;
 
     @Column(nullable = false, length = 3)
@@ -31,23 +36,20 @@ public class Account {
     protected Account() {
     }
 
-    public Account(String accountNumber, BigDecimal balance, String currency) {
+    public Account(AccountNumber accountNumber, String currency, UUID ownerId) {
         //Domain invariants - an object cannot be created with these states
-        if (balance == null) {
-            throw new IllegalArgumentException("Balance cannot be null");
+        if (ownerId == null) {
+            throw new IllegalArgumentException("Owner ID cannot be null");
         }
-        if (balance.compareTo(BigDecimal.ZERO) < 0) {
-            throw new IllegalArgumentException("Balance cannot be negative");
-        }
-        if (accountNumber == null || accountNumber.isBlank()) {
-            throw new IllegalArgumentException("Account number cannot be null or blank");
+        if (accountNumber == null) {
+            throw new IllegalArgumentException("Account number cannot be null");
         }
         if (currency == null || currency.isBlank()) {
             throw new IllegalArgumentException("Currency cannot be null or blank");
         }
-
+        this.ownerId = ownerId;
+        this.balance = BigDecimal.ZERO;
         this.accountNumber = accountNumber;
-        this.balance = balance;
         this.currency = currency;
         this.status = AccountStatus.ACTIVE;
     }
