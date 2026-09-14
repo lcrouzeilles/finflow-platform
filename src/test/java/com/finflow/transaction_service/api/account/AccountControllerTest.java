@@ -1,5 +1,7 @@
 package com.finflow.transaction_service.api.account;
 
+import com.finflow.transaction_service.domain.account.Account;
+import com.finflow.transaction_service.domain.account.AccountNumber;
 import com.finflow.transaction_service.domain.account.Owner;
 import com.finflow.transaction_service.repository.AccountRepository;
 import com.finflow.transaction_service.repository.OwnerRepository;
@@ -146,30 +148,28 @@ class AccountControllerTest {
     void shouldRetrieveAccountById() throws Exception {
         Owner owner = ownerRepository.saveAndFlush(new Owner());
 
-        CreateAccountRequest request = new CreateAccountRequest(
-                owner.getId(),
-                "ARS"
+        Account account = new Account(
+                new AccountNumber("FF-GET12345"),
+                "ARS",
+                owner.getId()
         );
 
-        AccountResponse createdAccount = objectMapper.readValue(
-                mockMvc.perform(
-                                post("/accounts")
-                                        .contentType(MediaType.APPLICATION_JSON)
-                                        .content(objectMapper.writeValueAsString(request))
-                        )
-                        .andReturn()
-                        .getResponse()
-                        .getContentAsString(),
-                AccountResponse.class
-        );
+        Account savedAccount = accountRepository.saveAndFlush(account);
 
-        mockMvc.perform(get("/accounts/{accountId}", createdAccount.id()))
+        mockMvc.perform(get("/accounts/{accountId}", savedAccount.getId()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(createdAccount.id().toString()))
-                .andExpect(jsonPath("$.ownerId").value(owner.getId().toString()))
-                .andExpect(jsonPath("$.currency").value("ARS"))
-                .andExpect(jsonPath("$.balance").value(0))
-                .andExpect(jsonPath("$.status").value("ACTIVE"));
+                .andExpect(jsonPath("$.id")
+                        .value(savedAccount.getId().toString()))
+                .andExpect(jsonPath("$.ownerId")
+                        .value(owner.getId().toString()))
+                .andExpect(jsonPath("$.accountNumber")
+                        .value("FF-GET12345"))
+                .andExpect(jsonPath("$.currency")
+                        .value("ARS"))
+                .andExpect(jsonPath("$.balance")
+                        .value(0))
+                .andExpect(jsonPath("$.status")
+                        .value("ACTIVE"));
     }
 
     @Test
