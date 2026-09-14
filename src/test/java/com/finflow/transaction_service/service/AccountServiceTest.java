@@ -3,6 +3,7 @@ package com.finflow.transaction_service.service;
 import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.account.AccountNumber;
 import com.finflow.transaction_service.domain.account.AccountNumberGenerator;
+import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.OwnerNotFoundException;
 import com.finflow.transaction_service.repository.AccountRepository;
 import com.finflow.transaction_service.repository.OwnerRepository;
@@ -12,8 +13,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -160,4 +163,40 @@ class AccountServiceTest {
                 result.getBalance().compareTo(java.math.BigDecimal.ZERO)
         );
     }
+
+    @Test
+    void shouldGetAccountById() {
+        UUID accountId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+
+        Account account = new Account(
+                new AccountNumber("FF-GET12345"),
+                "ARS",
+                ownerId
+        );
+
+        when(accountRepository.findById(accountId))
+                .thenReturn(Optional.of(account));
+
+        Account result = accountService.getAccount(accountId);
+
+        assertThat(result).isSameAs(account);
+
+        verify(accountRepository).findById(accountId);
+    }
+
+    @Test
+    void shouldThrowExceptionWhenAccountDoesNotExist() {
+        UUID accountId = UUID.randomUUID();
+
+        when(accountRepository.findById(accountId))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> accountService.getAccount(accountId))
+                .isInstanceOf(AccountNotFoundException.class)
+                .hasMessage("Account not found with id: " + accountId);
+
+        verify(accountRepository).findById(accountId);
+    }
+
 }
