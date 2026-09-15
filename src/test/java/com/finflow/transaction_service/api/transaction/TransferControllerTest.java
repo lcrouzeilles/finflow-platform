@@ -184,7 +184,12 @@ class TransferControllerTest {
                         .content(request))
                 .andExpect(status().is(422))
                 .andExpect(jsonPath("$.status").value(422))
-                .andExpect(jsonPath("$.error").value("Unprocessable Content"));
+                .andExpect(jsonPath("$.error").value("Unprocessable Content"))
+                .andExpect(jsonPath("$.message").value(
+                        "Insufficient funds. Requested: 150.00, available: 100.00"
+                ))
+                .andExpect(jsonPath("$.path").value("/transfers"))
+                .andExpect(jsonPath("$.fieldErrors").isEmpty());
     }
 
     @Test
