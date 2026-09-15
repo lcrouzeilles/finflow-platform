@@ -4,6 +4,7 @@ import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.account.AccountNumber;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
 import com.finflow.transaction_service.exception.AccountNotFoundException;
+import com.finflow.transaction_service.exception.InsufficientFundsException;
 import com.finflow.transaction_service.exception.InvalidTransferException;
 import com.finflow.transaction_service.repository.AccountRepository;
 import com.finflow.transaction_service.repository.TransactionRepository;
@@ -20,9 +21,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class TransferServiceTest {
@@ -231,6 +230,215 @@ class TransferServiceTest {
 
         verify(accountRepository).findById(sourceAccountId);
         verify(accountRepository).findById(destinationAccountId);
+    }
+
+    @Test
+    void shouldRejectTransferWhenCurrenciesDoNotMatch() {
+        Account sourceAccount = createAccount(
+                "FF-SOURCE04",
+                "ARS"
+        );
+
+        Account destinationAccount = createAccount(
+                "FF-DESTIN04",
+                "USD"
+        );
+
+        sourceAccount.deposit(new BigDecimal("100.00"));
+
+        when(accountRepository.findById(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        when(accountRepository.findById(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00")
+        );
+
+        assertThatThrownBy(() ->
+                transferService.transfer(request)
+        )
+                .isInstanceOf(InvalidTransferException.class)
+                .hasMessage(
+                        "Source and destination currencies must match"
+                );
+
+        verify(accountRepository).findById(sourceAccountId);
+        verify(accountRepository).findById(destinationAccountId);
+    }
+
+    @Test
+    void shouldTransferMoneyBetweenAccounts() {
+        Account sourceAccount = createAccount(
+                "FF-SOURCE05",
+                "ARS"
+        );
+
+        Account destinationAccount = createAccount(
+                "FF-DESTIN05",
+                "ARS"
+        );
+
+        sourceAccount.deposit(new BigDecimal("500.00"));
+
+        when(accountRepository.findById(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        when(accountRepository.findById(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00")
+        );
+
+        transferService.transfer(request);
+
+        org.assertj.core.api.Assertions.assertThat(
+                sourceAccount.getBalance()
+        ).isEqualByComparingTo("400.00");
+
+        org.assertj.core.api.Assertions.assertThat(
+                destinationAccount.getBalance()
+        ).isEqualByComparingTo("100.00");
+
+        verify(accountRepository).findById(sourceAccountId);
+        verify(accountRepository).findById(destinationAccountId);
+
+        verify(accountRepository).save(sourceAccount);
+        verify(accountRepository).save(destinationAccount);
+    }
+
+    @Test
+    void shouldRejectTransferWhenSourceAccountHasInsufficientFunds() {
+        Account sourceAccount = createAccount(
+                "FF-SOURCE06",
+                "ARS"
+        );
+
+        Account destinationAccount = createAccount(
+                "FF-DESTIN06",
+                "ARS"
+        );
+
+        sourceAccount.deposit(new BigDecimal("50.00"));
+
+        when(accountRepository.findById(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        when(accountRepository.findById(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00")
+        );
+
+        assertThatThrownBy(() ->
+                transferService.transfer(request)
+        )
+                .isInstanceOf(InsufficientFundsException.class)
+                .hasMessage("Insufficient funds");
+
+        org.assertj.core.api.Assertions.assertThat(
+                sourceAccount.getBalance()
+        ).isEqualByComparingTo("50.00");
+
+        org.assertj.core.api.Assertions.assertThat(
+                destinationAccount.getBalance()
+        ).isEqualByComparingTo("0.00");
+
+        verify(accountRepository).findById(sourceAccountId);
+        verify(accountRepository).findById(destinationAccountId);
+
+        org.mockito.Mockito.verify(
+                accountRepository,
+                never()
+        ).save(sourceAccount);
+
+        org.mockito.Mockito.verify(
+                accountRepository,
+                never()
+        ).save(destinationAccount);
+    }
+
+    @Test
+    void shouldNotSaveAccountsWhenCurrenciesDoNotMatch() {
+        Account sourceAccount = createAccount(
+                "FF-SOURCE07",
+                "ARS"
+        );
+
+        Account destinationAccount = createAccount(
+                "FF-DESTIN07",
+                "USD"
+        );
+
+        sourceAccount.deposit(new BigDecimal("100.00"));
+
+        when(accountRepository.findById(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        when(accountRepository.findById(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00")
+        );
+
+        assertThatThrownBy(() ->
+                transferService.transfer(request)
+        )
+                .isInstanceOf(InvalidTransferException.class)
+                .hasMessage(
+                        "Source and destination currencies must match"
+                );
+
+        verify(accountRepository, never()).save(sourceAccount);
+        verify(accountRepository, never()).save(destinationAccount);
+    }
+
+    @Test
+    void shouldRejectZeroAmount() {
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                BigDecimal.ZERO
+        );
+
+        assertThatThrownBy(() ->
+                transferService.transfer(request)
+        )
+                .isInstanceOf(InvalidTransferException.class)
+                .hasMessage("Transfer amount must be greater than zero");
+
+        verifyNoInteractions(accountRepository);
+        verifyNoInteractions(transactionRepository);
+    }
+
+    @Test
+    void shouldRejectNegativeAmount() {
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("-10.00")
+        );
+
+        assertThatThrownBy(() ->
+                transferService.transfer(request)
+        )
+                .isInstanceOf(InvalidTransferException.class)
+                .hasMessage("Transfer amount must be greater than zero");
+
+        verifyNoInteractions(accountRepository);
+        verifyNoInteractions(transactionRepository);
     }
 
     private Account createAccount(

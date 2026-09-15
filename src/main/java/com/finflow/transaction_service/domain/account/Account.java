@@ -93,7 +93,7 @@ public class Account {
             throw new IllegalArgumentException("Amount to be withdrawn cannot be negative or zero");
         }
         if (amount.compareTo(balance) > 0) {
-            throw new InsufficientFundsException(id);
+            throw new InsufficientFundsException();
         }
         balance = balance.subtract(amount);
     }
