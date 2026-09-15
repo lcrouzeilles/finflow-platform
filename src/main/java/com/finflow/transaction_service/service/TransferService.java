@@ -25,7 +25,7 @@ public class TransferService {
     }
 
     @Transactional
-    public void transfer(TransferRequest request) {
+    public Transaction transfer(TransferRequest request) {
         validateRequest(request);
 
         Account sourceAccount = accountRepository.findById(
@@ -61,7 +61,7 @@ public class TransferService {
 
         transaction.markAsCompleted();
 
-        transactionRepository.save(transaction);
+        return transactionRepository.save(transaction);
     }
 
     private void validateRequest(TransferRequest request) {

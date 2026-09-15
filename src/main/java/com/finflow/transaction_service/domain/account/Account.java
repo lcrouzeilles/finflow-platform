@@ -100,10 +100,7 @@ public class Account {
         }
 
         if (amount.compareTo(balance) > 0) {
-            throw new InsufficientFundsException(
-                    "Insufficient funds. Requested: " + amount
-                            + ", available: " + balance
-            );
+            throw new InsufficientFundsException(amount, balance);
         }
 
         balance = balance.subtract(amount);

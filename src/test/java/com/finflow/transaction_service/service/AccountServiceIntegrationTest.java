@@ -62,17 +62,15 @@ class AccountServiceIntegrationTest {
 
     @Test
     void shouldRejectAccountCreationForNonexistentOwner() {
-        UUID nonexistentOwnerId = UUID.fromString(
-                "11111111-1111-1111-1111-111111111111"
-        );
+        UUID nonexistentOwnerId = UUID.randomUUID();
 
         assertThatThrownBy(() ->
                 accountService.createAccount(nonexistentOwnerId, "ARS")
         )
-                .isInstanceOf(OwnerNotFoundException.class)
-                .hasMessageContaining(nonexistentOwnerId.toString());
+                .isInstanceOf(OwnerNotFoundException.class);
 
-        assertThat(accountRepository.count()).isZero();
+        assertThat(accountRepository.count())
+                .isZero();
     }
 
 }

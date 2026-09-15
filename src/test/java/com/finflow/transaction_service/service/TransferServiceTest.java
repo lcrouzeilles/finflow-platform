@@ -2,6 +2,7 @@ package com.finflow.transaction_service.service;
 
 import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.account.AccountNumber;
+import com.finflow.transaction_service.domain.account.AccountNumberGenerator;
 import com.finflow.transaction_service.domain.transaction.Transaction;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
 import com.finflow.transaction_service.exception.AccountNotFoundException;
@@ -21,6 +22,7 @@ import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
@@ -299,11 +301,11 @@ class TransferServiceTest {
 
         transferService.transfer(request);
 
-        org.assertj.core.api.Assertions.assertThat(
+        assertThat(
                 sourceAccount.getBalance()
         ).isEqualByComparingTo("400.00");
 
-        org.assertj.core.api.Assertions.assertThat(
+        assertThat(
                 destinationAccount.getBalance()
         ).isEqualByComparingTo("100.00");
 
@@ -313,60 +315,6 @@ class TransferServiceTest {
         verify(accountRepository).save(sourceAccount);
         verify(accountRepository).save(destinationAccount);
         verify(transactionRepository).save(any(Transaction.class));
-    }
-
-    @Test
-    void shouldRejectTransferWhenSourceAccountHasInsufficientFunds() {
-        Account sourceAccount = createAccount(
-                "FF-SOURCE06",
-                "ARS"
-        );
-
-        Account destinationAccount = createAccount(
-                "FF-DESTIN06",
-                "ARS"
-        );
-
-        sourceAccount.deposit(new BigDecimal("50.00"));
-
-        when(accountRepository.findById(sourceAccountId))
-                .thenReturn(Optional.of(sourceAccount));
-
-        when(accountRepository.findById(destinationAccountId))
-                .thenReturn(Optional.of(destinationAccount));
-
-        TransferRequest request = new TransferRequest(
-                sourceAccountId,
-                destinationAccountId,
-                new BigDecimal("100.00")
-        );
-
-        assertThatThrownBy(() ->
-                transferService.transfer(request)
-        )
-                .isInstanceOf(InsufficientFundsException.class)
-                .hasMessage("Insufficient funds. Requested: 100.00, available: 50.00");
-
-        org.assertj.core.api.Assertions.assertThat(
-                sourceAccount.getBalance()
-        ).isEqualByComparingTo("50.00");
-
-        org.assertj.core.api.Assertions.assertThat(
-                destinationAccount.getBalance()
-        ).isEqualByComparingTo("0.00");
-
-        verify(accountRepository).findById(sourceAccountId);
-        verify(accountRepository).findById(destinationAccountId);
-
-        org.mockito.Mockito.verify(
-                accountRepository,
-                never()
-        ).save(sourceAccount);
-
-        org.mockito.Mockito.verify(
-                accountRepository,
-                never()
-        ).save(destinationAccount);
     }
 
     @Test
@@ -441,6 +389,52 @@ class TransferServiceTest {
 
         verifyNoInteractions(accountRepository);
         verifyNoInteractions(transactionRepository);
+    }
+
+    @Test
+    void shouldRejectTransferWhenSourceAccountHasInsufficientFunds() {
+        AccountNumberGenerator accountNumberGenerator = new AccountNumberGenerator();
+        AccountNumber sourceAccountNumber = accountNumberGenerator.generate();
+        AccountNumber destinationAccountNumber = accountNumberGenerator.generate();
+
+        Account sourceAccount = createAccount(sourceAccountNumber.getValue(),"ARS");
+        Account destinationAccount = createAccount(destinationAccountNumber.getValue(),"ARS");
+
+        sourceAccount.deposit(new BigDecimal("100.00"));
+        destinationAccount.deposit(new BigDecimal("50.00"));
+
+        UUID sourceAccountId = UUID.randomUUID();
+        UUID destinationAccountId = UUID.randomUUID();
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("150.00")
+        );
+
+        when(accountRepository.findById(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        when(accountRepository.findById(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+
+        assertThatThrownBy(() ->
+                transferService.transfer(request)
+        )
+                .isInstanceOf(InsufficientFundsException.class)
+                .hasMessageContaining("Insufficient funds");
+
+        assertThat(sourceAccount.getBalance())
+                .isEqualByComparingTo("100.00");
+
+        assertThat(destinationAccount.getBalance())
+                .isEqualByComparingTo("50.00");
+
+        verify(accountRepository, never())
+                .save(any(Account.class));
+
+        verify(transactionRepository, never())
+                .save(any(Transaction.class));
     }
 
     private Account createAccount(

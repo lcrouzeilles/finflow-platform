@@ -1,9 +1,11 @@
 package com.finflow.transaction_service.api.error;
 
 import com.finflow.transaction_service.exception.AccountNotFoundException;
+import com.finflow.transaction_service.exception.InsufficientFundsException;
 import com.finflow.transaction_service.exception.OwnerNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -69,6 +71,22 @@ public class GlobalExceptionHandler {
                 Instant.now(),
                 HttpStatus.NOT_FOUND.value(),
                 HttpStatus.NOT_FOUND.getReasonPhrase(),
+                exception.getMessage(),
+                request.getRequestURI(),
+                Map.of()
+        );
+    }
+
+    @ExceptionHandler(InsufficientFundsException.class)
+    @ResponseStatus(HttpStatus.UNPROCESSABLE_CONTENT)
+    public ApiErrorResponse handleInsufficientFunds(
+            InsufficientFundsException exception,
+            HttpServletRequest request
+    ) {
+        return new ApiErrorResponse(
+                Instant.now(),
+                HttpStatus.UNPROCESSABLE_CONTENT.value(),
+                "Unprocessable Content",
                 exception.getMessage(),
                 request.getRequestURI(),
                 Map.of()
