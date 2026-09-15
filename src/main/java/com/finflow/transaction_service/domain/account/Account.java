@@ -1,5 +1,6 @@
 package com.finflow.transaction_service.domain.account;
 
+import com.finflow.transaction_service.exception.InsufficientFundsException;
 import jakarta.persistence.*;
 import lombok.Getter;
 
@@ -52,6 +53,37 @@ public class Account {
         this.status = AccountStatus.ACTIVE;
     }
 
+    Account(
+            UUID id,
+            AccountNumber accountNumber,
+            String currency,
+            UUID ownerId
+    ) {
+        this.id = id;
+        this.accountNumber = accountNumber;
+        this.currency = currency;
+        this.ownerId = ownerId;
+        this.balance = BigDecimal.ZERO;
+        this.status = AccountStatus.ACTIVE;
+    }
+
+    public static Account forTest(
+            UUID id,
+            AccountNumber accountNumber,
+            String currency,
+            UUID ownerId
+    ) {
+        Account account = new Account(
+                accountNumber,
+                currency,
+                ownerId
+        );
+
+        account.id = id;
+
+        return account;
+    }
+
     public void withdraw (BigDecimal amount) {
         //Business rules - the object is responsible for maintaining valid states
         if (amount == null) {
@@ -61,7 +93,7 @@ public class Account {
             throw new IllegalArgumentException("Amount to be withdrawn cannot be negative or zero");
         }
         if (amount.compareTo(balance) > 0) {
-            throw new IllegalArgumentException("Amount to be withdrawn cannot be greater than balance");
+            throw new InsufficientFundsException(id);
         }
         balance = balance.subtract(amount);
     }

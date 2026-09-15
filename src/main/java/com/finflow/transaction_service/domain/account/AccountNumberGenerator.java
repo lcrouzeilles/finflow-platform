@@ -11,7 +11,7 @@ public class AccountNumberGenerator {
 
     private static final int RANDOM_LENGTH = 8;
 
-    private final SecureRandom random = new SecureRandom();
+    private static final SecureRandom random = new SecureRandom();
 
     public AccountNumber generate() {
         StringBuilder tail = new StringBuilder();
