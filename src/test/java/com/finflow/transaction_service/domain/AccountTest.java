@@ -9,6 +9,7 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AccountTest {
@@ -211,6 +212,22 @@ class AccountTest {
 
         assertThat(account.getBalance())
                 .isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    void shouldThrowExceptionWhenWithdrawingMoreThanAvailableBalance() {
+        Account account = createAccount();
+
+        account.deposit(new BigDecimal("100.00"));
+
+        assertThatThrownBy(() ->
+                account.withdraw(new BigDecimal("150.00"))
+        )
+                .isInstanceOf(InsufficientFundsException.class)
+                .hasMessageContaining("Insufficient funds");
+
+        assertThat(account.getBalance())
+                .isEqualByComparingTo("100.00");
     }
 
     private Account createAccount() {

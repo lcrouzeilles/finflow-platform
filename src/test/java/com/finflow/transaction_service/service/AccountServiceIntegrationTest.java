@@ -5,6 +5,7 @@ import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.exception.OwnerNotFoundException;
 import com.finflow.transaction_service.repository.AccountRepository;
 import com.finflow.transaction_service.repository.OwnerRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -29,6 +30,12 @@ class AccountServiceIntegrationTest {
 
     @Autowired
     private OwnerRepository ownerRepository;
+
+    @BeforeEach
+    void cleanDatabase() {
+        accountRepository.deleteAll();
+        ownerRepository.deleteAll();
+    }
 
     @Test
     void shouldCreateAccountForExistingOwner() {

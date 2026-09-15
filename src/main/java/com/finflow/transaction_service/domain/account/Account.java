@@ -84,17 +84,28 @@ public class Account {
         return account;
     }
 
-    public void withdraw (BigDecimal amount) {
-        //Business rules - the object is responsible for maintaining valid states
+    public void withdraw(BigDecimal amount) {
+        // Business rules: the object is responsible for maintaining valid states.
+
         if (amount == null) {
-            throw new IllegalArgumentException("Amount cannot be null");
+            throw new IllegalArgumentException(
+                    "Amount cannot be null"
+            );
         }
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Amount to be withdrawn cannot be negative or zero");
+
+        if (amount.signum() <= 0) {
+            throw new IllegalArgumentException(
+                    "Amount to be withdrawn must be greater than zero"
+            );
         }
+
         if (amount.compareTo(balance) > 0) {
-            throw new InsufficientFundsException();
+            throw new InsufficientFundsException(
+                    "Insufficient funds. Requested: " + amount
+                            + ", available: " + balance
+            );
         }
+
         balance = balance.subtract(amount);
     }
 

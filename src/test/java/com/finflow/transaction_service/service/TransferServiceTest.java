@@ -2,6 +2,7 @@ package com.finflow.transaction_service.service;
 
 import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.account.AccountNumber;
+import com.finflow.transaction_service.domain.transaction.Transaction;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
 import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.InsufficientFundsException;
@@ -311,6 +312,7 @@ class TransferServiceTest {
 
         verify(accountRepository).save(sourceAccount);
         verify(accountRepository).save(destinationAccount);
+        verify(transactionRepository).save(any(Transaction.class));
     }
 
     @Test
@@ -343,7 +345,7 @@ class TransferServiceTest {
                 transferService.transfer(request)
         )
                 .isInstanceOf(InsufficientFundsException.class)
-                .hasMessage("Insufficient funds");
+                .hasMessage("Insufficient funds. Requested: 100.00, available: 50.00");
 
         org.assertj.core.api.Assertions.assertThat(
                 sourceAccount.getBalance()

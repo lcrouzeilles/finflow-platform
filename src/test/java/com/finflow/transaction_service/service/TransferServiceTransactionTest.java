@@ -1,0 +1,102 @@
+package com.finflow.transaction_service.service;
+
+import com.finflow.transaction_service.domain.account.Owner;
+import com.finflow.transaction_service.domain.account.Account;
+import com.finflow.transaction_service.domain.account.AccountNumber;
+import com.finflow.transaction_service.domain.transaction.Transaction;
+import com.finflow.transaction_service.domain.transaction.TransferRequest;
+import com.finflow.transaction_service.repository.AccountRepository;
+import com.finflow.transaction_service.repository.OwnerRepository;
+import com.finflow.transaction_service.repository.TransactionRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+@SpringBootTest
+@ActiveProfiles("test")
+class TransferServiceTransactionTest {
+
+    @Autowired
+    private TransferService transferService;
+
+    @Autowired
+    private AccountRepository accountRepository;
+
+    @Autowired
+    private OwnerRepository ownerRepository;
+
+    @Autowired
+    private TransactionRepository transactionRepository;
+
+    private UUID sourceAccountId;
+    private UUID destinationAccountId;
+
+    @BeforeEach
+    void setUp() {
+        transactionRepository.deleteAll();
+        accountRepository.deleteAll();
+        ownerRepository.deleteAll();
+
+        Owner sourceOwner = ownerRepository.save(new Owner());
+        Owner destinationOwner = ownerRepository.save(new Owner());
+
+        Account sourceAccount = accountRepository.save(
+                new Account(
+                        new AccountNumber("FF-TRANS001"),
+                        "ARS",
+                        sourceOwner.getId()
+                )
+        );
+
+        Account destinationAccount = accountRepository.save(
+                new Account(
+                        new AccountNumber("FF-TRANS002"),
+                        "ARS",
+                        destinationOwner.getId()
+                )
+        );
+
+        sourceAccount.deposit(new BigDecimal("500.00"));
+
+        accountRepository.save(sourceAccount);
+
+        sourceAccountId = sourceAccount.getId();
+        destinationAccountId = destinationAccount.getId();
+    }
+
+    @Test
+    void shouldCommitAccountChangesAndTransaction() {
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00")
+        );
+
+        transferService.transfer(request);
+
+        Account sourceAccount = accountRepository
+                .findById(sourceAccountId)
+                .orElseThrow();
+
+        Account destinationAccount = accountRepository
+                .findById(destinationAccountId)
+                .orElseThrow();
+
+        assertThat(sourceAccount.getBalance())
+                .isEqualByComparingTo("400.00");
+
+        assertThat(destinationAccount.getBalance())
+                .isEqualByComparingTo("100.00");
+
+        assertThat(transactionRepository.count())
+                .isEqualTo(1);
+    }
+}

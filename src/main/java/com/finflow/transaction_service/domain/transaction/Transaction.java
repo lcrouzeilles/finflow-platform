@@ -87,4 +87,14 @@ public class Transaction {
         this.status = TransactionStatus.PENDING;
         this.createdAt = Instant.now();
     }
+
+    public void markAsCompleted() {
+        if (this.status != TransactionStatus.PENDING) {
+            throw new IllegalStateException(
+                    "Only pending transactions can be completed"
+            );
+        }
+
+        this.status = TransactionStatus.COMPLETED;
+    }
 }

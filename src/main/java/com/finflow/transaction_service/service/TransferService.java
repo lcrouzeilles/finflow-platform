@@ -1,6 +1,7 @@
 package com.finflow.transaction_service.service;
 
 import com.finflow.transaction_service.domain.account.Account;
+import com.finflow.transaction_service.domain.transaction.Transaction;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
 import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.InvalidTransferException;
@@ -50,6 +51,17 @@ public class TransferService {
 
         accountRepository.save(sourceAccount);
         accountRepository.save(destinationAccount);
+
+        Transaction transaction = new Transaction(
+                request.sourceAccountId(),
+                request.destinationAccountId(),
+                request.amount(),
+                sourceAccount.getCurrency()
+        );
+
+        transaction.markAsCompleted();
+
+        transactionRepository.save(transaction);
     }
 
     private void validateRequest(TransferRequest request) {
