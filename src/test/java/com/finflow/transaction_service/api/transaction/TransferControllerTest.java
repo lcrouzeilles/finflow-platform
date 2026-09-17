@@ -6,6 +6,7 @@ import com.finflow.transaction_service.domain.transaction.Transaction;
 import com.finflow.transaction_service.domain.transaction.TransactionStatus;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
 import com.finflow.transaction_service.exception.AccountNotFoundException;
+import com.finflow.transaction_service.exception.IdempotencyKeyConflictException;
 import com.finflow.transaction_service.exception.InsufficientFundsException;
 import com.finflow.transaction_service.service.TransferService;
 import org.junit.jupiter.api.Test;
@@ -21,9 +22,11 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -55,7 +58,8 @@ class TransferControllerTest {
                 sourceAccountId,
                 destinationAccountId,
                 new BigDecimal("150.00"),
-                "ARS"
+                "ARS",
+                "controller-test-key"
         );
 
         transaction.markAsCompleted();
@@ -67,6 +71,7 @@ class TransferControllerTest {
                         post("/transfers")
                                 .contentType(APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsString(request))
+                                .header("Idempotency-Key", "controller-success-001")
                 )
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.sourceAccountId")
@@ -92,7 +97,8 @@ class TransferControllerTest {
 
         mockMvc.perform(post("/transfers")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(request))
+                        .content(request)
+                        .header("Idempotency-Key", "no-source-account-001"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -107,7 +113,8 @@ class TransferControllerTest {
 
         mockMvc.perform(post("/transfers")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(request))
+                        .content(request)
+                        .header("Idempotency-Key", "no-destination-account-001"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -122,7 +129,8 @@ class TransferControllerTest {
 
         mockMvc.perform(post("/transfers")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(request))
+                        .content(request)
+                        .header("Idempotency-Key", "no-amount-001"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -138,7 +146,8 @@ class TransferControllerTest {
 
         mockMvc.perform(post("/transfers")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(request))
+                        .content(request)
+                        .header("Idempotency-Key", "zero-amount-001"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -154,7 +163,8 @@ class TransferControllerTest {
 
         mockMvc.perform(post("/transfers")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(request))
+                        .content(request)
+                        .header("Idempotency-Key", "negative-amount-001"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -181,7 +191,8 @@ class TransferControllerTest {
 
         mockMvc.perform(post("/transfers")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(request))
+                        .content(request)
+                        .header("Idempotency-Key", "insufficient-funds-001"))
                 .andExpect(status().is(422))
                 .andExpect(jsonPath("$.status").value(422))
                 .andExpect(jsonPath("$.error").value("Unprocessable Content"))
@@ -210,9 +221,33 @@ class TransferControllerTest {
 
         mockMvc.perform(post("/transfers")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(request))
+                        .content(request)
+                        .header("Idempotency-Key", "account-does-not-exist-001"))
                 .andExpect(status().is(404))
                 .andExpect(jsonPath("$.status").value(404));
+    }
+
+    @Test
+    void shouldReturn409WhenIdempotencyKeyConflicts()
+            throws Exception {
+
+        when(transferService.transfer(any(TransferRequest.class)))
+                .thenThrow(new IdempotencyKeyConflictException(
+                        "Idempotency-Key was already used with different transfer data"
+                ));
+
+        mockMvc.perform(post("/transfers")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", "controller-conflict-001")
+                        .content("""
+                    {
+                      "sourceAccountId": "11111111-1111-1111-1111-111111111111",
+                      "destinationAccountId": "22222222-2222-2222-2222-222222222222",
+                      "amount": 200.00
+                    }
+                    """))
+                .andDo(print())
+                .andExpect(status().isConflict());
     }
 
 }

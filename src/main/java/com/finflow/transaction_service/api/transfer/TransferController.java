@@ -20,13 +20,15 @@ public class TransferController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public TransferResponse transfer(
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody CreateTransferRequest request
     ) {
         Transaction transaction = transferService.transfer(
                 new TransferRequest(
                         request.sourceAccountId(),
                         request.destinationAccountId(),
-                        request.amount()
+                        request.amount(),
+                        idempotencyKey
                 )
         );
 

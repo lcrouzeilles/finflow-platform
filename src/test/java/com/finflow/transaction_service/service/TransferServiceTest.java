@@ -70,7 +70,8 @@ class TransferServiceTest {
         TransferRequest request = new TransferRequest(
                 null,
                 destinationAccountId,
-                new BigDecimal("100.00")
+                new BigDecimal("100.00"),
+                "transfer-test-001"
         );
 
         assertThatThrownBy(() ->
@@ -88,7 +89,8 @@ class TransferServiceTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 null,
-                new BigDecimal("100.00")
+                new BigDecimal("100.00"),
+                "transfer-test-001"
         );
 
         assertThatThrownBy(() ->
@@ -106,7 +108,8 @@ class TransferServiceTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 sourceAccountId,
-                new BigDecimal("100.00")
+                new BigDecimal("100.00"),
+                "transfer-test-001"
         );
 
         assertThatThrownBy(() ->
@@ -144,7 +147,8 @@ class TransferServiceTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 destinationAccountId,
-                new BigDecimal("100.00")
+                new BigDecimal("100.00"),
+                "transfer-test-001"
         );
 
         transferService.transfer(request);
@@ -173,7 +177,8 @@ class TransferServiceTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 destinationAccountId,
-                new BigDecimal("100.00")
+                new BigDecimal("100.00"),
+                "transfer-test-001"
         );
 
         transferService.transfer(request);
@@ -189,7 +194,8 @@ class TransferServiceTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 destinationAccountId,
-                new BigDecimal("100.00")
+                new BigDecimal("100.00"),
+                "transfer-test-001"
         );
 
         assertThatThrownBy(() ->
@@ -219,7 +225,8 @@ class TransferServiceTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 destinationAccountId,
-                new BigDecimal("100.00")
+                new BigDecimal("100.00"),
+                "transfer-test-001"
         );
 
         assertThatThrownBy(() ->
@@ -258,7 +265,8 @@ class TransferServiceTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 destinationAccountId,
-                new BigDecimal("100.00")
+                new BigDecimal("100.00"),
+                "transfer-test-001"
         );
 
         assertThatThrownBy(() ->
@@ -296,7 +304,8 @@ class TransferServiceTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 destinationAccountId,
-                new BigDecimal("100.00")
+                new BigDecimal("100.00"),
+                "transfer-test-001"
         );
 
         transferService.transfer(request);
@@ -340,7 +349,8 @@ class TransferServiceTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 destinationAccountId,
-                new BigDecimal("100.00")
+                new BigDecimal("100.00"),
+                "transfer-test-001"
         );
 
         assertThatThrownBy(() ->
@@ -360,7 +370,8 @@ class TransferServiceTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 destinationAccountId,
-                BigDecimal.ZERO
+                BigDecimal.ZERO,
+                "transfer-test-001"
         );
 
         assertThatThrownBy(() ->
@@ -378,7 +389,8 @@ class TransferServiceTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 destinationAccountId,
-                new BigDecimal("-10.00")
+                new BigDecimal("-10.00"),
+                "transfer-test-001"
         );
 
         assertThatThrownBy(() ->
@@ -409,7 +421,8 @@ class TransferServiceTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 destinationAccountId,
-                new BigDecimal("150.00")
+                new BigDecimal("150.00"),
+                "transfer-test-001"
         );
 
         when(accountRepository.findById(sourceAccountId))

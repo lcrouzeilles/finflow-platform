@@ -4,11 +4,14 @@ import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.transaction.Transaction;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
 import com.finflow.transaction_service.exception.AccountNotFoundException;
+import com.finflow.transaction_service.exception.IdempotencyKeyConflictException;
 import com.finflow.transaction_service.exception.InvalidTransferException;
 import com.finflow.transaction_service.repository.AccountRepository;
 import com.finflow.transaction_service.repository.TransactionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Optional;
 
 @Service
 public class TransferService {
@@ -27,6 +30,20 @@ public class TransferService {
     @Transactional
     public Transaction transfer(TransferRequest request) {
         validateRequest(request);
+        validateIdempotencyKey(request.idempotencyKey());
+
+        Optional<Transaction> existingTransaction =
+                transactionRepository.findByIdempotencyKey(
+                        request.idempotencyKey()
+                );
+
+        if (existingTransaction.isPresent()) {
+            Transaction transaction = existingTransaction.get();
+
+            validateIdempotencyReuse(transaction, request);
+
+            return transaction;
+        }
 
         Account sourceAccount = accountRepository.findById(
                 request.sourceAccountId()
@@ -56,12 +73,27 @@ public class TransferService {
                 request.sourceAccountId(),
                 request.destinationAccountId(),
                 request.amount(),
-                sourceAccount.getCurrency()
+                sourceAccount.getCurrency(),
+                request.idempotencyKey()
         );
 
         transaction.markAsCompleted();
 
         return transactionRepository.save(transaction);
+    }
+
+    private void validateIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Idempotency-Key header is required"
+            );
+        }
+
+        if (idempotencyKey.length() > 100) {
+            throw new IllegalArgumentException(
+                    "Idempotency-Key must not exceed 100 characters"
+            );
+        }
     }
 
     private void validateRequest(TransferRequest request) {
@@ -96,6 +128,13 @@ public class TransferService {
                     "Transfer amount must be greater than zero"
             );
         }
+
+        if (request.idempotencyKey() == null
+                || request.idempotencyKey().isBlank()) {
+            throw new IllegalArgumentException(
+                    "Idempotency key cannot be blank"
+            );
+        }
     }
 
     private void validateAccounts(
@@ -106,6 +145,31 @@ public class TransferService {
                 .equals(destinationAccount.getCurrency())) {
             throw new InvalidTransferException(
                     "Source and destination currencies must match"
+            );
+        }
+    }
+
+    private void validateIdempotencyReuse(
+            Transaction transaction,
+            TransferRequest request
+    ) {
+        boolean sameSourceAccount =
+                transaction.getSourceAccountId()
+                        .equals(request.sourceAccountId());
+
+        boolean sameDestinationAccount =
+                transaction.getDestinationAccountId()
+                        .equals(request.destinationAccountId());
+
+        boolean sameAmount =
+                transaction.getAmount()
+                        .compareTo(request.amount()) == 0;
+
+        if (!sameSourceAccount
+                || !sameDestinationAccount
+                || !sameAmount) {
+            throw new IdempotencyKeyConflictException(
+                    "Idempotency-Key was already used with different transfer data"
             );
         }
     }

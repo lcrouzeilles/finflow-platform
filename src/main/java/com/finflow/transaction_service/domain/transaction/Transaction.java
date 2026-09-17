@@ -16,6 +16,9 @@ public class Transaction {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    @Column(name = "idempotency_key", nullable = false, length = 100, unique = true)
+    private String idempotencyKey;
+
     @Column(name = "source_account_id", nullable = false)
     private UUID sourceAccountId;
 
@@ -42,7 +45,8 @@ public class Transaction {
             UUID sourceAccountId,
             UUID destinationAccountId,
             BigDecimal amount,
-            String currency
+            String currency,
+            String idempotencyKey
     ) {
         if (sourceAccountId == null) {
             throw new IllegalArgumentException(
@@ -80,10 +84,23 @@ public class Transaction {
             );
         }
 
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Idempotency key cannot be blank"
+            );
+        }
+
+        if (idempotencyKey.length() > 100) {
+            throw new IllegalArgumentException(
+                    "Idempotency key cannot exceed 100 characters"
+            );
+        }
+
         this.sourceAccountId = sourceAccountId;
         this.destinationAccountId = destinationAccountId;
         this.amount = amount;
         this.currency = currency;
+        this.idempotencyKey = idempotencyKey;
         this.status = TransactionStatus.PENDING;
         this.createdAt = Instant.now();
     }

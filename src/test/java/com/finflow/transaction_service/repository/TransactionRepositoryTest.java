@@ -33,7 +33,8 @@ class TransactionRepositoryTest {
                 sourceAccountId,
                 destinationAccountId,
                 new BigDecimal("100.0000"),
-                "ARS"
+                "ARS",
+                "repository-test-key"
         );
 
         Transaction saved = transactionRepository.save(transaction);
@@ -66,7 +67,8 @@ class TransactionRepositoryTest {
                 UUID.randomUUID(),
                 UUID.randomUUID(),
                 new BigDecimal("1250.5000"),
-                "ARS"
+                "ARS",
+                "repository-test-key"
         );
 
         Transaction saved = transactionRepository.save(transaction);

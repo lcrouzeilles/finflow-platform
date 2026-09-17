@@ -5,6 +5,8 @@ import com.finflow.transaction_service.domain.transaction.TransferRequest;
 import com.finflow.transaction_service.repository.TransactionRepository;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
+
 @Component
 public class TransactionCreator {
 
@@ -24,7 +26,8 @@ public class TransactionCreator {
                 request.sourceAccountId(),
                 request.destinationAccountId(),
                 request.amount(),
-                currency
+                currency,
+                "test-" + UUID.randomUUID()
         );
 
         transaction.markAsCompleted();

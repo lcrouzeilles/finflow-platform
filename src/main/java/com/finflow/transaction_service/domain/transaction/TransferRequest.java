@@ -6,6 +6,7 @@ import java.util.UUID;
 public record TransferRequest(
         UUID sourceAccountId,
         UUID destinationAccountId,
-        BigDecimal amount
+        BigDecimal amount,
+        String idempotencyKey
 ) {
 }

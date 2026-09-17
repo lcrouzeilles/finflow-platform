@@ -6,6 +6,7 @@ import com.finflow.transaction_service.domain.account.AccountNumber;
 import com.finflow.transaction_service.domain.transaction.Transaction;
 import com.finflow.transaction_service.domain.transaction.TransactionStatus;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
+import com.finflow.transaction_service.exception.IdempotencyKeyConflictException;
 import com.finflow.transaction_service.exception.InsufficientFundsException;
 import com.finflow.transaction_service.repository.AccountRepository;
 import com.finflow.transaction_service.repository.OwnerRepository;
@@ -81,7 +82,8 @@ class TransferServiceIntegrationTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 destinationAccountId,
-                new BigDecimal("100.00")
+                new BigDecimal("100.00"),
+                "transfer-test-001"
         );
 
         transferService.transfer(request);
@@ -129,7 +131,8 @@ class TransferServiceIntegrationTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 destinationAccountId,
-                new BigDecimal("600.00")
+                new BigDecimal("600.00"),
+                "transfer-test-001"
         );
 
         assertThatThrownBy(() -> transferService.transfer(request))
@@ -151,6 +154,85 @@ class TransferServiceIntegrationTest {
 
         assertThat(transactionRepository.count())
                 .isZero();
+    }
+
+    @Test
+    void shouldReturnExistingTransactionWhenSameIdempotencyKeyIsReused() {
+        String idempotencyKey = "transfer-retry-001";
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                idempotencyKey
+        );
+
+        Transaction firstTransaction =
+                transferService.transfer(request);
+
+        Transaction secondTransaction =
+                transferService.transfer(request);
+
+        assertThat(secondTransaction.getId())
+                .isEqualTo(firstTransaction.getId());
+
+        Account sourceAccount = accountRepository
+                .findById(sourceAccountId)
+                .orElseThrow();
+
+        Account destinationAccount = accountRepository
+                .findById(destinationAccountId)
+                .orElseThrow();
+
+        assertThat(sourceAccount.getBalance())
+                .isEqualByComparingTo("400.00");
+
+        assertThat(destinationAccount.getBalance())
+                .isEqualByComparingTo("100.00");
+
+        assertThat(transactionRepository.count())
+                .isEqualTo(1);
+    }
+
+    @Test
+    void shouldRejectSameIdempotencyKeyWithDifferentTransferData() {
+        String idempotencyKey = "same-key-different-data";
+
+        TransferRequest firstRequest = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                idempotencyKey
+        );
+
+        TransferRequest secondRequest = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("200.00"),
+                idempotencyKey
+        );
+
+        transferService.transfer(firstRequest);
+
+        assertThatThrownBy(() ->
+                transferService.transfer(secondRequest)
+        )
+                .isInstanceOf(IdempotencyKeyConflictException.class);
+
+        Account sourceAccount =
+                accountRepository.findById(sourceAccountId).orElseThrow();
+
+        Account destinationAccount =
+                accountRepository.findById(destinationAccountId).orElseThrow();
+
+        assertThat(sourceAccount.getBalance())
+                .isEqualByComparingTo("400.00");
+
+        assertThat(destinationAccount.getBalance())
+                .isEqualByComparingTo("100.00");
+
+        assertThat(transactionRepository.count())
+                .isEqualTo(1);
     }
 
 }

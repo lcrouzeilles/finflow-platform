@@ -85,7 +85,8 @@ class TransferServiceRollbackTest {
         TransferRequest request = new TransferRequest(
                 sourceAccountId,
                 destinationAccountId,
-                new BigDecimal("300.00")
+                new BigDecimal("300.00"),
+                "rollback-test-key"
         );
 
         assertThatThrownBy(() -> transferService.transfer(request))
