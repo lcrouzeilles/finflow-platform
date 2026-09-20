@@ -3,7 +3,6 @@ package com.finflow.transaction_service.api.transaction;
 import com.finflow.transaction_service.api.transfer.CreateTransferRequest;
 import com.finflow.transaction_service.api.transfer.TransferController;
 import com.finflow.transaction_service.domain.transaction.Transaction;
-import com.finflow.transaction_service.domain.transaction.TransactionStatus;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
 import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.IdempotencyKeyConflictException;
@@ -18,11 +17,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
