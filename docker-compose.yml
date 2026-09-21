@@ -17,10 +17,9 @@ services:
       retries: 5
 
   transaction-service:
-    build: .
+    build:
+      context: ./transaction-service
     container_name: finflow-transaction-service
-    ports:
-      - "8080:8080"
     environment:
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
@@ -46,6 +45,17 @@ services:
     volumes:
       - finflow-keycloak-data:/opt/keycloak/data
       - ./keycloak:/opt/keycloak/data/import
+  api-gateway:
+    build:
+      context: ./api-gateway
+    container_name: finflow-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      - transaction-service
+      - keycloak
 
 volumes:
   finflow-postgres-data:
