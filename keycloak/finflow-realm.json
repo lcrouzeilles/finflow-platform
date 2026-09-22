@@ -36,6 +36,7 @@
   "users": [
     {
       "username": "lcrouzeilles",
+      "email": "lrcrouzeilles@hotmail.com",
       "enabled": true,
       "emailVerified": true,
       "credentials": [
