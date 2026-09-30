@@ -36,7 +36,6 @@ public class Account {
     }
 
     public Account(AccountNumber accountNumber, String currency, UUID ownerId) {
-        //Domain invariants - an object cannot be created with these states
         if (ownerId == null) {
             throw new IllegalArgumentException("Owner ID cannot be null");
         }
