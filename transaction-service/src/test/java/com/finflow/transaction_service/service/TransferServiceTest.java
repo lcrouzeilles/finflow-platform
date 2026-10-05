@@ -5,6 +5,7 @@ import com.finflow.transaction_service.domain.account.AccountNumber;
 import com.finflow.transaction_service.domain.account.AccountNumberGenerator;
 import com.finflow.transaction_service.domain.transaction.Transaction;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
+import com.finflow.transaction_service.event.TransferCompletedEvent;
 import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.InsufficientFundsException;
 import com.finflow.transaction_service.exception.InvalidTransferException;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
@@ -35,6 +37,9 @@ class TransferServiceTest {
     @Mock
     private TransactionRepository transactionRepository;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private TransferService transferService;
 
     private UUID sourceAccountId;
@@ -45,7 +50,8 @@ class TransferServiceTest {
     void setUp() {
         transferService = new TransferService(
                 accountRepository,
-                transactionRepository
+                transactionRepository,
+                eventPublisher
         );
 
         sourceAccountId = UUID.randomUUID();
@@ -324,6 +330,9 @@ class TransferServiceTest {
         verify(accountRepository).save(sourceAccount);
         verify(accountRepository).save(destinationAccount);
         verify(transactionRepository).save(any(Transaction.class));
+        verify(eventPublisher).publishEvent(
+                any(TransferCompletedEvent.class)
+        );
     }
 
     @Test

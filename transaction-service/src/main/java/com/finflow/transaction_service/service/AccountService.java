@@ -6,6 +6,7 @@ import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.OwnerNotFoundException;
 import com.finflow.transaction_service.repository.AccountRepository;
 import com.finflow.transaction_service.repository.OwnerRepository;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
@@ -42,6 +43,7 @@ public class AccountService {
         return accountRepository.save(newAccount);
     }
 
+    @Cacheable(cacheNames = "accounts", key = "#accountId")
     public Account getAccount(UUID accountId) {
         return accountRepository.findById(accountId)
                 .orElseThrow(() -> new AccountNotFoundException(accountId));

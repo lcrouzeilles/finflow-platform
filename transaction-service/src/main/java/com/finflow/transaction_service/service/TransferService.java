@@ -3,72 +3,101 @@ package com.finflow.transaction_service.service;
 import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.transaction.Transaction;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
+import com.finflow.transaction_service.event.TransferCompletedEvent;
 import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.IdempotencyKeyConflictException;
 import com.finflow.transaction_service.exception.InvalidTransferException;
 import com.finflow.transaction_service.repository.AccountRepository;
 import com.finflow.transaction_service.repository.TransactionRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Optional;
+import java.math.BigDecimal;
+import java.util.UUID;
 
 @Service
 public class TransferService {
 
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public TransferService(
             AccountRepository accountRepository,
-            TransactionRepository transactionRepository
+            TransactionRepository transactionRepository, ApplicationEventPublisher eventPublisher
     ) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
     public Transaction transfer(TransferRequest request) {
         validateRequest(request);
-        validateIdempotencyKey(request.idempotencyKey());
 
-        Optional<Transaction> existingTransaction =
-                transactionRepository.findByIdempotencyKey(
-                        request.idempotencyKey()
-                );
+        Transaction existingTransaction = findExistingTransaction(request);
 
-        if (existingTransaction.isPresent()) {
-            Transaction transaction = existingTransaction.get();
-
-            validateIdempotencyReuse(transaction, request);
-
-            return transaction;
+        if (existingTransaction != null) {
+            validateIdempotencyReuse(existingTransaction, request);
+            return existingTransaction;
         }
 
-        Account sourceAccount = accountRepository.findById(
-                request.sourceAccountId()
-        ).orElseThrow(() ->
-                new AccountNotFoundException(
-                        request.sourceAccountId()
-                )
+        Account sourceAccount = getAccount(request.sourceAccountId());
+        Account destinationAccount = getAccount(request.destinationAccountId());
+
+        validateAccounts(sourceAccount, destinationAccount);
+
+        executeTransfer(sourceAccount, destinationAccount, request.amount());
+
+        Transaction transaction = createTransaction(
+                sourceAccount,
+                request
         );
 
-        Account destinationAccount = accountRepository.findById(
-                request.destinationAccountId()
-        ).orElseThrow(() ->
-                new AccountNotFoundException(
+        Transaction savedTransaction = transactionRepository.save(transaction);
+
+        eventPublisher.publishEvent(
+                new TransferCompletedEvent(
+                        request.sourceAccountId(),
                         request.destinationAccountId()
                 )
         );
 
-        validateAccounts(sourceAccount, destinationAccount);
+        return savedTransaction;
+    }
 
-        sourceAccount.withdraw(request.amount());
-        destinationAccount.deposit(request.amount());
+    private Transaction findExistingTransaction(TransferRequest request) {
+        validateIdempotencyKey(request.idempotencyKey());
+
+        return transactionRepository
+                .findByIdempotencyKey(request.idempotencyKey())
+                .orElse(null);
+    }
+
+    private Account getAccount(UUID accountId) {
+        return accountRepository.findById(accountId)
+                .orElseThrow(() ->
+                        new AccountNotFoundException(accountId)
+                );
+    }
+
+    private void executeTransfer(
+            Account sourceAccount,
+            Account destinationAccount,
+            BigDecimal amount
+    ) {
+        sourceAccount.withdraw(amount);
+        destinationAccount.deposit(amount);
 
         accountRepository.save(sourceAccount);
         accountRepository.save(destinationAccount);
+    }
 
+    private Transaction createTransaction(
+            Account sourceAccount,
+            TransferRequest request
+    ) {
         Transaction transaction = new Transaction(
                 request.sourceAccountId(),
                 request.destinationAccountId(),
@@ -79,7 +108,7 @@ public class TransferService {
 
         transaction.markAsCompleted();
 
-        return transactionRepository.save(transaction);
+        return transaction;
     }
 
     private void validateIdempotencyKey(String idempotencyKey) {
