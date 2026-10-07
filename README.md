@@ -124,11 +124,10 @@ http://localhost:8080/swagger-ui/index.html
 - [x] Keycloak authentication
 - [x] API Gateway
 - [x] Monorepo structure
+- [x] CI/CD with GitHub Actions
+- [x] Redis
 
 ### Next
-
-- [ ] CI/CD with GitHub Actions
-- [ ] Redis
 - [ ] Kafka
 - [ ] Transactional Outbox
 - [ ] Kubernetes
