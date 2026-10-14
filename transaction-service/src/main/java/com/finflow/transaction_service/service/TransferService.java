@@ -1,6 +1,9 @@
 package com.finflow.transaction_service.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.finflow.transaction_service.domain.account.Account;
+import com.finflow.transaction_service.domain.outbox.OutboxEvent;
 import com.finflow.transaction_service.domain.transaction.Transaction;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
 import com.finflow.transaction_service.event.TransferCompletedEvent;
@@ -8,6 +11,7 @@ import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.IdempotencyKeyConflictException;
 import com.finflow.transaction_service.exception.InvalidTransferException;
 import com.finflow.transaction_service.repository.AccountRepository;
+import com.finflow.transaction_service.repository.OutboxEventRepository;
 import com.finflow.transaction_service.repository.TransactionRepository;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -22,14 +26,21 @@ public class TransferService {
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final OutboxEventRepository outboxEventRepository;
+    private final ObjectMapper objectMapper;
 
     public TransferService(
             AccountRepository accountRepository,
-            TransactionRepository transactionRepository, ApplicationEventPublisher eventPublisher
+            TransactionRepository transactionRepository,
+            ApplicationEventPublisher eventPublisher,
+            OutboxEventRepository outboxEventRepository,
+            ObjectMapper objectMapper
     ) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
         this.eventPublisher = eventPublisher;
+        this.outboxEventRepository = outboxEventRepository;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
@@ -57,12 +68,23 @@ public class TransferService {
 
         Transaction savedTransaction = transactionRepository.save(transaction);
 
-        eventPublisher.publishEvent(
-                new TransferCompletedEvent(
-                        request.sourceAccountId(),
-                        request.destinationAccountId()
-                )
+        TransferCompletedEvent event = new TransferCompletedEvent(
+                request.sourceAccountId(),
+                request.destinationAccountId()
         );
+
+        OutboxEvent outboxEvent = new OutboxEvent(
+                "TRANSACTION",
+                savedTransaction.getId(),
+                "TRANSFER_COMPLETED",
+                serializeEvent(event)
+        );
+
+        outboxEventRepository.save(outboxEvent);
+
+        // Temporary: preserve the existing Kafka flow until the
+        // Outbox publisher is implemented.
+        eventPublisher.publishEvent(event);
 
         return savedTransaction;
     }
@@ -199,6 +221,17 @@ public class TransferService {
                 || !sameAmount) {
             throw new IdempotencyKeyConflictException(
                     "Idempotency-Key was already used with different transfer data"
+            );
+        }
+    }
+
+    private String serializeEvent(TransferCompletedEvent event) {
+        try {
+            return objectMapper.writeValueAsString(event);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException(
+                    "Failed to serialize transfer completed event",
+                    exception
             );
         }
     }

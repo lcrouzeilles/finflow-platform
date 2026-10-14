@@ -1,5 +1,6 @@
 package com.finflow.transaction_service.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.account.AccountNumber;
 import com.finflow.transaction_service.domain.account.AccountNumberGenerator;
@@ -10,6 +11,7 @@ import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.InsufficientFundsException;
 import com.finflow.transaction_service.exception.InvalidTransferException;
 import com.finflow.transaction_service.repository.AccountRepository;
+import com.finflow.transaction_service.repository.OutboxEventRepository;
 import com.finflow.transaction_service.repository.TransactionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.util.Optional;
@@ -40,6 +43,9 @@ class TransferServiceTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private OutboxEventRepository outboxEventRepository;
+
     private TransferService transferService;
 
     private UUID sourceAccountId;
@@ -51,12 +57,15 @@ class TransferServiceTest {
         transferService = new TransferService(
                 accountRepository,
                 transactionRepository,
-                eventPublisher
+                eventPublisher,
+                outboxEventRepository,
+                new ObjectMapper()
         );
 
         sourceAccountId = UUID.randomUUID();
         destinationAccountId = UUID.randomUUID();
         ownerId = UUID.randomUUID();
+
     }
 
     @Test
@@ -157,6 +166,7 @@ class TransferServiceTest {
                 "transfer-test-001"
         );
 
+        stubTransactionSave();
         transferService.transfer(request);
 
         verify(accountRepository).findById(sourceAccountId);
@@ -187,6 +197,7 @@ class TransferServiceTest {
                 "transfer-test-001"
         );
 
+        stubTransactionSave();
         transferService.transfer(request);
 
         verify(accountRepository).findById(destinationAccountId);
@@ -314,6 +325,7 @@ class TransferServiceTest {
                 "transfer-test-001"
         );
 
+        stubTransactionSave();
         transferService.transfer(request);
 
         assertThat(
@@ -329,9 +341,22 @@ class TransferServiceTest {
 
         verify(accountRepository).save(sourceAccount);
         verify(accountRepository).save(destinationAccount);
-        verify(transactionRepository).save(any(Transaction.class));
         verify(eventPublisher).publishEvent(
                 any(TransferCompletedEvent.class)
+        );
+
+        verify(outboxEventRepository).save(
+                argThat(event ->
+                        "TRANSACTION".equals(event.getAggregateType())
+                                && "TRANSFER_COMPLETED".equals(event.getEventType())
+                                && event.getAggregateId() != null
+                                && event.getPayload().contains(
+                                sourceAccountId.toString()
+                        )
+                                && event.getPayload().contains(
+                                destinationAccountId.toString()
+                        )
+                )
         );
     }
 
@@ -468,5 +493,20 @@ class TransferServiceTest {
                 currency,
                 ownerId
         );
+    }
+
+    private void stubTransactionSave() {
+        when(transactionRepository.save(any(Transaction.class)))
+                .thenAnswer(invocation -> {
+                    Transaction saved = invocation.getArgument(0);
+
+                    ReflectionTestUtils.setField(
+                            saved,
+                            "id",
+                            UUID.randomUUID()
+                    );
+
+                    return saved;
+                });
     }
 }
