@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.account.AccountNumber;
 import com.finflow.transaction_service.domain.account.AccountNumberGenerator;
+import com.finflow.transaction_service.domain.outbox.OutboxEvent;
 import com.finflow.transaction_service.domain.transaction.Transaction;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
 import com.finflow.transaction_service.event.TransferCompletedEvent;
@@ -482,6 +483,35 @@ class TransferServiceTest {
 
         verify(transactionRepository, never())
                 .save(any(Transaction.class));
+    }
+
+    @Test
+    void shouldNotCreateOutboxEventWhenTransferIsRejected() {
+        Account sourceAccount = createAccount("FF-SOURCE08", "ARS");
+        Account destinationAccount = createAccount("FF-DESTIN08", "ARS");
+
+        sourceAccount.deposit(new BigDecimal("10.00"));
+
+        when(accountRepository.findById(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        when(accountRepository.findById(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "transfer-rejected-test"
+        );
+
+        assertThatThrownBy(() -> transferService.transfer(request))
+                .isInstanceOf(InsufficientFundsException.class);
+
+        verify(outboxEventRepository, never()).save(any(OutboxEvent.class));
+        verify(eventPublisher, never()).publishEvent(
+                any(TransferCompletedEvent.class)
+        );
     }
 
     private Account createAccount(

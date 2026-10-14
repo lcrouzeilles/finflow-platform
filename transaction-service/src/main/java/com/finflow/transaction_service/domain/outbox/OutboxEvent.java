@@ -39,6 +39,15 @@ public class OutboxEvent {
     @Column(name = "last_error", columnDefinition = "TEXT")
     private String lastError;
 
+    @Column(name = "claimed_by", length = 200)
+    private String claimedBy;
+
+    @Column(name = "claim_until")
+    private Instant claimUntil;
+
+    @Column(name = "next_attempt_at")
+    private Instant nextAttemptAt;
+
     protected OutboxEvent() {
         // Required by JPA
     }
@@ -61,11 +70,31 @@ public class OutboxEvent {
     public void markPublished() {
         this.publishedAt = Instant.now();
         this.lastError = null;
+        this.nextAttemptAt = null;
+        clearClaim();
     }
 
     public void markFailed(String error) {
         this.attempts++;
+
+        long delaySeconds = Math.min(
+                300L,
+                1L << Math.min(this.attempts - 1, 9)
+        );
+
+        this.nextAttemptAt = Instant.now().plusSeconds(delaySeconds);
         this.lastError = error;
+        clearClaim();
+    }
+
+    public void claim(String workerId, Instant until) {
+        this.claimedBy = workerId;
+        this.claimUntil = until;
+    }
+
+    public void clearClaim() {
+        this.claimedBy = null;
+        this.claimUntil = null;
     }
 
 }
