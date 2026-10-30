@@ -54,6 +54,7 @@ The project uses a single Git repository with independently deployable Spring Bo
 
 - REST API for accounts and transfers
 - Transaction management and rollback
+- Pessimistic row locking with deterministic lock ordering for concurrent transfers
 - Idempotency support
 - PostgreSQL persistence
 - Flyway database migrations
@@ -142,3 +143,119 @@ FinFlow is being developed incrementally to demonstrate practical experience wit
 ## License
 
 This project is for educational and portfolio purposes.
+
+## TODO / Future Improvements
+
+The following improvements are intentionally deferred to future
+iterations. They are outside the scope of the current implementation
+roadmap unless required by a new feature or a correctness issue.
+
+### 1. Transaction Reliability and Data Consistency
+
+-   [x] Add optimistic or pessimistic locking to prevent concurrent
+    transfers from causing lost balance updates or overdrafts.
+-   [x] Add integration tests for concurrent transfers involving the
+    same account.
+-   [x] Review transaction isolation and database locking behavior under
+    concurrent requests.
+
+### 2. Security and Authorization
+
+-   [ ] Implement account-level authorization to ensure users can only
+    access and manage accounts they own, unless explicitly authorized as
+    administrators.
+-   [ ] Map Keycloak identities to application-level owners.
+-   [ ] Add integration tests for unauthorized account access and
+    cross-user operations.
+-   [ ] Review security configuration before deploying outside the local
+    development environment.
+
+### 3. Transactional Outbox Reliability
+
+-   [ ] Implement a maximum retry policy for repeatedly failing outbox
+    events.
+-   [ ] Introduce terminal failure handling or a dead-letter mechanism
+    for events that exceed the retry limit.
+-   [ ] Provide an operational mechanism to inspect, repair, and replay
+    failed events.
+-   [ ] Add monitoring for pending events, retry counts, publication
+    failures, and event processing delays.
+-   [ ] Expand failure-recovery tests to cover process crashes, Kafka
+    timeouts, and lease expiration.
+
+### 4. Event-Driven Architecture
+
+-   [ ] Include stable event IDs and transaction IDs in event payloads
+    to support deduplication and workflow correlation.
+-   [ ] Introduce event schema versioning and compatibility rules as
+    additional event types are added.
+-   [ ] Implement idempotent Kafka consumers using durable event
+    deduplication.
+-   [ ] Test duplicate message delivery and relevant out-of-order
+    processing scenarios.
+-   [ ] Document the at-least-once delivery guarantee and the
+    possibility of duplicate events.
+
+### 5. API and Error Handling
+
+-   [ ] Standardize HTTP error responses for domain validation failures
+    and persistence conflicts.
+-   [ ] Return appropriate status codes for invalid requests and
+    idempotency-key conflicts.
+-   [ ] Add controller integration tests for error response contracts.
+
+### 6. Testing Infrastructure
+
+-   [ ] Isolate integration tests from the development database.
+-   [ ] Ensure test cleanup affects only records created by the test.
+-   [ ] Evaluate Testcontainers for disposable PostgreSQL and other
+    infrastructure dependencies.
+-   [ ] Add CI integration tests covering database migrations,
+    concurrent operations, and messaging workflows.
+
+### 7. Observability and Operations
+
+-   [ ] Add structured logging with transaction IDs, event IDs, and
+    correlation IDs.
+-   [ ] Introduce metrics for transfer processing, outbox publication,
+    retry activity, and consumer failures.
+-   [ ] Add distributed tracing across the API gateway, transaction
+    service, and asynchronous workflows.
+-   [ ] Define alerts for stuck outbox events and repeated publication
+    failures.
+
+### 8. Infrastructure and Configuration
+
+-   [ ] Align gateway routes and service URLs across local and Docker
+    profiles.
+-   [ ] Make PostgreSQL health checks use the configured database
+    credentials.
+-   [ ] Keep test-only configuration exclusively in test resources.
+-   [ ] Remove redundant database indexes after validating query plans.
+-   [ ] Pin infrastructure image versions and review container health
+    checks.
+-   [ ] Separate development credentials from deployment configuration.
+-   [ ] Exclude local secrets, IDE metadata, Git metadata, and generated
+    build artifacts from source handoffs.
+
+### 9. Documentation
+
+-   [ ] Document the transactional outbox flow, retry policy, lease
+    recovery, and delivery guarantees.
+-   [ ] Document the Saga state machine, failure handling, and
+    compensating actions.
+-   [ ] Document local development setup, integration-test execution,
+    and required infrastructure.
+-   [ ] Maintain an architecture decision record for significant design
+    trade-offs.
+
+------------------------------------------------------------------------
+
+**Roadmap scope:** the immediate roadmap remains focused on transaction
+correctness, test isolation, Saga orchestration, and idempotent event
+consumption. The items above are a backlog, not a prerequisite
+checklist.
+
+When a deferred item becomes necessary for a feature---for example,
+durable event IDs when building consumer deduplication---promote it into
+that milestone rather than leaving it deferred indefinitely.

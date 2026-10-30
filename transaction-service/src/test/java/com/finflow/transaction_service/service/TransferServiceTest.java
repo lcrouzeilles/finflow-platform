@@ -154,10 +154,10 @@ class TransferServiceTest {
 
         sourceAccount.deposit(new BigDecimal("100.00"));
 
-        when(accountRepository.findById(sourceAccountId))
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
                 .thenReturn(Optional.of(sourceAccount));
 
-        when(accountRepository.findById(destinationAccountId))
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
                 .thenReturn(Optional.of(destinationAccount));
 
         TransferRequest request = new TransferRequest(
@@ -170,7 +170,7 @@ class TransferServiceTest {
         stubTransactionSave();
         transferService.transfer(request);
 
-        verify(accountRepository).findById(sourceAccountId);
+        verify(accountRepository).findByIdForUpdate(sourceAccountId);
     }
 
     @Test
@@ -185,10 +185,10 @@ class TransferServiceTest {
                 "ARS"
         );
         sourceAccount.deposit(new BigDecimal("100.00"));
-        when(accountRepository.findById(sourceAccountId))
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
                 .thenReturn(Optional.of(sourceAccount));
 
-        when(accountRepository.findById(destinationAccountId))
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
                 .thenReturn(Optional.of(destinationAccount));
 
         TransferRequest request = new TransferRequest(
@@ -201,12 +201,19 @@ class TransferServiceTest {
         stubTransactionSave();
         transferService.transfer(request);
 
-        verify(accountRepository).findById(destinationAccountId);
+        verify(accountRepository).findByIdForUpdate(destinationAccountId);
     }
 
     @Test
     void shouldRejectWhenSourceAccountDoesNotExist() {
-        when(accountRepository.findById(sourceAccountId))
+        sourceAccountId = UUID.fromString(
+                "00000000-0000-0000-0000-000000000001"
+        );
+        destinationAccountId = UUID.fromString(
+                "00000000-0000-0000-0000-000000000002"
+        );
+
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
                 .thenReturn(Optional.empty());
 
         TransferRequest request = new TransferRequest(
@@ -216,28 +223,28 @@ class TransferServiceTest {
                 "transfer-test-001"
         );
 
-        assertThatThrownBy(() ->
-                transferService.transfer(request)
-        )
+        assertThatThrownBy(() -> transferService.transfer(request))
                 .isInstanceOf(AccountNotFoundException.class)
-                .hasMessage(
-                        "Account not found with id: " + sourceAccountId
-                );
+                .hasMessage("Account not found with id: " + sourceAccountId);
 
-        verify(accountRepository).findById(sourceAccountId);
+        verify(accountRepository).findByIdForUpdate(sourceAccountId);
     }
 
     @Test
     void shouldRejectWhenDestinationAccountDoesNotExist() {
-        Account sourceAccount = createAccount(
-                "FF-SOURCE03",
-                "ARS"
+        sourceAccountId = UUID.fromString(
+                "00000000-0000-0000-0000-000000000001"
+        );
+        destinationAccountId = UUID.fromString(
+                "00000000-0000-0000-0000-000000000002"
         );
 
-        when(accountRepository.findById(sourceAccountId))
+        Account sourceAccount = createAccount("FF-SOURCE03", "ARS");
+
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
                 .thenReturn(Optional.of(sourceAccount));
 
-        when(accountRepository.findById(destinationAccountId))
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
                 .thenReturn(Optional.empty());
 
         TransferRequest request = new TransferRequest(
@@ -247,17 +254,14 @@ class TransferServiceTest {
                 "transfer-test-001"
         );
 
-        assertThatThrownBy(() ->
-                transferService.transfer(request)
-        )
+        assertThatThrownBy(() -> transferService.transfer(request))
                 .isInstanceOf(AccountNotFoundException.class)
                 .hasMessage(
-                        "Account not found with id: "
-                                + destinationAccountId
+                        "Account not found with id: " + destinationAccountId
                 );
 
-        verify(accountRepository).findById(sourceAccountId);
-        verify(accountRepository).findById(destinationAccountId);
+        verify(accountRepository).findByIdForUpdate(sourceAccountId);
+        verify(accountRepository).findByIdForUpdate(destinationAccountId);
     }
 
     @Test
@@ -274,10 +278,10 @@ class TransferServiceTest {
 
         sourceAccount.deposit(new BigDecimal("100.00"));
 
-        when(accountRepository.findById(sourceAccountId))
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
                 .thenReturn(Optional.of(sourceAccount));
 
-        when(accountRepository.findById(destinationAccountId))
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
                 .thenReturn(Optional.of(destinationAccount));
 
         TransferRequest request = new TransferRequest(
@@ -295,8 +299,8 @@ class TransferServiceTest {
                         "Source and destination currencies must match"
                 );
 
-        verify(accountRepository).findById(sourceAccountId);
-        verify(accountRepository).findById(destinationAccountId);
+        verify(accountRepository).findByIdForUpdate(sourceAccountId);
+        verify(accountRepository).findByIdForUpdate(destinationAccountId);
     }
 
     @Test
@@ -313,10 +317,10 @@ class TransferServiceTest {
 
         sourceAccount.deposit(new BigDecimal("500.00"));
 
-        when(accountRepository.findById(sourceAccountId))
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
                 .thenReturn(Optional.of(sourceAccount));
 
-        when(accountRepository.findById(destinationAccountId))
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
                 .thenReturn(Optional.of(destinationAccount));
 
         TransferRequest request = new TransferRequest(
@@ -337,8 +341,8 @@ class TransferServiceTest {
                 destinationAccount.getBalance()
         ).isEqualByComparingTo("100.00");
 
-        verify(accountRepository).findById(sourceAccountId);
-        verify(accountRepository).findById(destinationAccountId);
+        verify(accountRepository).findByIdForUpdate(sourceAccountId);
+        verify(accountRepository).findByIdForUpdate(destinationAccountId);
 
         verify(accountRepository).save(sourceAccount);
         verify(accountRepository).save(destinationAccount);
@@ -375,10 +379,10 @@ class TransferServiceTest {
 
         sourceAccount.deposit(new BigDecimal("100.00"));
 
-        when(accountRepository.findById(sourceAccountId))
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
                 .thenReturn(Optional.of(sourceAccount));
 
-        when(accountRepository.findById(destinationAccountId))
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
                 .thenReturn(Optional.of(destinationAccount));
 
         TransferRequest request = new TransferRequest(
@@ -460,10 +464,10 @@ class TransferServiceTest {
                 "transfer-test-001"
         );
 
-        when(accountRepository.findById(sourceAccountId))
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
                 .thenReturn(Optional.of(sourceAccount));
 
-        when(accountRepository.findById(destinationAccountId))
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
                 .thenReturn(Optional.of(destinationAccount));
 
         assertThatThrownBy(() ->
@@ -492,10 +496,10 @@ class TransferServiceTest {
 
         sourceAccount.deposit(new BigDecimal("10.00"));
 
-        when(accountRepository.findById(sourceAccountId))
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
                 .thenReturn(Optional.of(sourceAccount));
 
-        when(accountRepository.findById(destinationAccountId))
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
                 .thenReturn(Optional.of(destinationAccount));
 
         TransferRequest request = new TransferRequest(

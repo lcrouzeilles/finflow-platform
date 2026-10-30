@@ -54,8 +54,19 @@ public class TransferService {
             return existingTransaction;
         }
 
-        Account sourceAccount = getAccount(request.sourceAccountId());
-        Account destinationAccount = getAccount(request.destinationAccountId());
+        Account sourceAccount;
+        Account destinationAccount;
+
+        UUID sourceId = request.sourceAccountId();
+        UUID destinationId = request.destinationAccountId();
+
+        if (sourceId.compareTo(destinationId) < 0) {
+            sourceAccount = getAccountForUpdate(sourceId);
+            destinationAccount = getAccountForUpdate(destinationId);
+        } else {
+            destinationAccount = getAccountForUpdate(destinationId);
+            sourceAccount = getAccountForUpdate(sourceId);
+        }
 
         validateAccounts(sourceAccount, destinationAccount);
 
@@ -95,13 +106,6 @@ public class TransferService {
         return transactionRepository
                 .findByIdempotencyKey(request.idempotencyKey())
                 .orElse(null);
-    }
-
-    private Account getAccount(UUID accountId) {
-        return accountRepository.findById(accountId)
-                .orElseThrow(() ->
-                        new AccountNotFoundException(accountId)
-                );
     }
 
     private void executeTransfer(
@@ -234,5 +238,12 @@ public class TransferService {
                     exception
             );
         }
+    }
+
+    private Account getAccountForUpdate(UUID accountId) {
+        return accountRepository.findByIdForUpdate(accountId)
+                .orElseThrow(() ->
+                        new AccountNotFoundException(accountId)
+                );
     }
 }
