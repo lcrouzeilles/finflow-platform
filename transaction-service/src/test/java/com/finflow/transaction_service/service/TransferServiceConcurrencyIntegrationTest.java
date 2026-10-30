@@ -1,5 +1,6 @@
 package com.finflow.transaction_service.service;
 
+import com.finflow.transaction_service.AbstractIntegrationTest;
 import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.account.AccountNumber;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
@@ -21,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
 @ActiveProfiles("test")
-class TransferServiceConcurrencyIntegrationTest {
+class TransferServiceConcurrencyIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private TransferService transferService;

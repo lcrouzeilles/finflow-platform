@@ -1,5 +1,7 @@
 # FinFlow Transaction Platform
 
+[![CI](https://github.com/lcrouzeilles/finflow-platform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lcrouzeilles/finflow-platform/actions/workflows/ci.yml)
+
 FinFlow is a production-oriented backend platform for processing financial transactions, built as a portfolio and learning project.
 
 The project focuses on modern backend engineering, security, distributed systems, and cloud-native infrastructure.
@@ -48,6 +50,7 @@ The project uses a single Git repository with independently deployable Spring Bo
 - Flyway
 - OpenAPI / Swagger
 - Docker / Docker Compose
+- Testcontainers
 - Maven
 
 ## Current Features
@@ -63,7 +66,7 @@ The project uses a single Git repository with independently deployable Spring Bo
 - Keycloak identity management
 - API Gateway routing and security
 - Dockerized local environment
-- Integration testing
+- Integration testing with Testcontainers
 - OpenAPI documentation
 
 ## Docker Environment
@@ -123,6 +126,23 @@ http://localhost:8080/swagger-ui/index.html
   - `POST /transfers` requires the source account to belong to the caller (`403` otherwise). Transfers to accounts of other owners are allowed.
   - An idempotency key can only be replayed by the owner who created the transaction (`403` otherwise), so a foreign key cannot be used to read someone else's transaction.
 
+## Testing
+
+Integration tests start disposable PostgreSQL and Redis containers with Testcontainers, so the only prerequisite is a running Docker daemon. No local database, fixed port or `.env` is needed:
+
+```bash
+cd transaction-service
+./mvnw verify
+```
+
+CI runs the same command on GitHub Actions.
+
+If Maven cannot download dependencies on Windows because an antivirus or proxy intercepts TLS (`PKIX path building failed`), let the JVM use the Windows certificate store instead of disabling verification:
+
+```powershell
+$env:MAVEN_OPTS = "-Djavax.net.ssl.trustStoreType=WINDOWS-ROOT"
+```
+
 ## Roadmap
 
 ### Completed
@@ -139,6 +159,7 @@ http://localhost:8080/swagger-ui/index.html
 - [x] CI/CD with GitHub Actions
 - [x] Redis
 - [x] Account-level authorization (Keycloak identity → owner)
+- [x] Testcontainers-based integration tests
 
 ### Next
 - [ ] Kafka
@@ -218,11 +239,12 @@ roadmap unless required by a new feature or a correctness issue.
 
 ### 6. Testing Infrastructure
 
--   [ ] Isolate integration tests from the development database.
+-   [x] Isolate integration tests from the development database.
 -   [ ] Ensure test cleanup affects only records created by the test.
--   [ ] Evaluate Testcontainers for disposable PostgreSQL and other
+    *(Less pressing now that every run uses a disposable database.)*
+-   [x] Evaluate Testcontainers for disposable PostgreSQL and other
     infrastructure dependencies.
--   [ ] Add CI integration tests covering database migrations,
+-   [x] Add CI integration tests covering database migrations,
     concurrent operations, and messaging workflows.
 
 ### 7. Observability and Operations
@@ -242,7 +264,7 @@ roadmap unless required by a new feature or a correctness issue.
     profiles.
 -   [ ] Make PostgreSQL health checks use the configured database
     credentials.
--   [ ] Keep test-only configuration exclusively in test resources.
+-   [x] Keep test-only configuration exclusively in test resources.
 -   [ ] Remove redundant database indexes after validating query plans.
 -   [ ] Pin infrastructure image versions and review container health
     checks.
@@ -256,7 +278,7 @@ roadmap unless required by a new feature or a correctness issue.
     recovery, and delivery guarantees.
 -   [ ] Document the Saga state machine, failure handling, and
     compensating actions.
--   [ ] Document local development setup, integration-test execution,
+-   [x] Document local development setup, integration-test execution,
     and required infrastructure.
 -   [ ] Maintain an architecture decision record for significant design
     trade-offs.

@@ -1,5 +1,6 @@
 package com.finflow.transaction_service.service;
 
+import com.finflow.transaction_service.AbstractIntegrationTest;
 import com.finflow.transaction_service.domain.account.Owner;
 import com.finflow.transaction_service.repository.OwnerRepository;
 import org.junit.jupiter.api.Test;
@@ -19,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
-class OwnerIdentityServiceIntegrationTest {
+class OwnerIdentityServiceIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private OwnerIdentityService ownerIdentityService;

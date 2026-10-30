@@ -1,5 +1,6 @@
 package com.finflow.transaction_service.api.account;
 
+import com.finflow.transaction_service.AbstractIntegrationTest;
 import com.finflow.transaction_service.config.TestSecurityConfig;
 import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.account.AccountNumber;
@@ -33,7 +34,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 @ActiveProfiles("test")
 @Transactional
 @Import(TestSecurityConfig.class)
-class AccountControllerTest {
+class AccountControllerTest extends AbstractIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;

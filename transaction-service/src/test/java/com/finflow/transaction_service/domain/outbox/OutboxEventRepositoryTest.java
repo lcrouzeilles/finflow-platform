@@ -1,5 +1,6 @@
 package com.finflow.transaction_service.domain.outbox;
 
+import com.finflow.transaction_service.AbstractIntegrationTest;
 import com.finflow.transaction_service.repository.OutboxEventRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @AutoConfigureTestDatabase(
         replace = AutoConfigureTestDatabase.Replace.NONE
 )
-class OutboxEventRepositoryTest {
+class OutboxEventRepositoryTest extends AbstractIntegrationTest {
 
     @Autowired
     private OutboxEventRepository repository;

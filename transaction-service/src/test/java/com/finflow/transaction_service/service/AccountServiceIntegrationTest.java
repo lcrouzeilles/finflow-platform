@@ -1,5 +1,6 @@
 package com.finflow.transaction_service.service;
 
+import com.finflow.transaction_service.AbstractIntegrationTest;
 import com.finflow.transaction_service.domain.account.Owner;
 import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.exception.OwnerNotFoundException;
@@ -20,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @SpringBootTest
 @ActiveProfiles("test")
 @Transactional
-class AccountServiceIntegrationTest {
+class AccountServiceIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private AccountService accountService;

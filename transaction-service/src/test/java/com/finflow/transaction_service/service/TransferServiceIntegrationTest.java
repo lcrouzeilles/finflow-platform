@@ -1,5 +1,6 @@
 package com.finflow.transaction_service.service;
 
+import com.finflow.transaction_service.AbstractIntegrationTest;
 import com.finflow.transaction_service.domain.account.Owner;
 import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.account.AccountNumber;
@@ -28,7 +29,7 @@ import static org.mockito.Mockito.doThrow;
 
 @SpringBootTest
 @ActiveProfiles("test")
-class TransferServiceIntegrationTest {
+class TransferServiceIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private TransferService transferService;

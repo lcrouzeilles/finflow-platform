@@ -1,5 +1,6 @@
 package com.finflow.transaction_service.repository;
 
+import com.finflow.transaction_service.AbstractIntegrationTest;
 import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.account.AccountNumber;
 import com.finflow.transaction_service.domain.account.AccountStatus;
@@ -16,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DataJpaTest
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-class AccountRepositoryTest {
+class AccountRepositoryTest extends AbstractIntegrationTest {
 
     @Autowired
     private AccountRepository accountRepository;

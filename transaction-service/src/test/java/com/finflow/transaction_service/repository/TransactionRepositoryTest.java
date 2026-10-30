@@ -1,5 +1,6 @@
 package com.finflow.transaction_service.repository;
 
+import com.finflow.transaction_service.AbstractIntegrationTest;
 import com.finflow.transaction_service.domain.transaction.Transaction;
 import com.finflow.transaction_service.domain.transaction.TransactionStatus;
 import org.junit.jupiter.api.Test;
@@ -19,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DataJpaTest
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-class TransactionRepositoryTest {
+class TransactionRepositoryTest extends AbstractIntegrationTest {
 
     @Autowired
     private TransactionRepository transactionRepository;

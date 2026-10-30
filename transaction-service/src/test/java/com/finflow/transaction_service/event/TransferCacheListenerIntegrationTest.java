@@ -1,5 +1,6 @@
 package com.finflow.transaction_service.event;
 
+import com.finflow.transaction_service.AbstractIntegrationTest;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 @SpringBootTest
 @ActiveProfiles("test")
-class TransferCacheListenerIntegrationTest {
+class TransferCacheListenerIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;

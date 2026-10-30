@@ -13,30 +13,6 @@ jobs:
     name: Transaction Service
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: finflow
-          POSTGRES_USER: finflow
-          POSTGRES_PASSWORD: finflow
-        ports:
-          - 55433:5432
-        options: >-
-          --health-cmd="pg_isready -U finflow -d finflow"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     defaults:
       run:
         working-directory: transaction-service
@@ -52,8 +28,8 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Test
-        run: ./mvnw test
+      - name: Verify
+        run: ./mvnw --batch-mode verify
 
   api-gateway:
     name: API Gateway
@@ -74,5 +50,5 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Test
-        run: ./mvnw test
+      - name: Verify
+        run: ./mvnw --batch-mode verify

@@ -1,6 +1,7 @@
 
 package com.finflow.transaction_service.domain.outbox;
 
+import com.finflow.transaction_service.AbstractIntegrationTest;
 import com.finflow.transaction_service.repository.OutboxEventRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         replace = AutoConfigureTestDatabase.Replace.NONE
 )
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-class OutboxEventRepositoryConcurrencyTest {
+class OutboxEventRepositoryConcurrencyTest extends AbstractIntegrationTest {
 
     @Autowired
     private OutboxEventRepository repository;
@@ -37,25 +38,30 @@ class OutboxEventRepositoryConcurrencyTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
+    private static final String TEST_AGGREGATE_TYPE =
+            "OUTBOX_CONCURRENCY_TEST";
+
     @Test
     void concurrentWorkersShouldClaimDifferentEvents() throws Exception {
         TransactionTemplate transaction =
                 new TransactionTemplate(transactionManager);
 
-        // Use only a dedicated test database: this clears existing outbox rows.
+        repository.deleteAllInBatch();
+        repository.flush();
+
+        // Remove any leftover fixtures from previous test executions.
         List<UUID> eventIds = transaction.execute(status -> {
-            repository.deleteAllInBatch();
-            repository.flush();
+            cleanUpTestEvents();
 
             OutboxEvent first = new OutboxEvent(
-                    "TRANSACTION",
+                    TEST_AGGREGATE_TYPE,
                     UUID.randomUUID(),
                     "TRANSFER_COMPLETED",
                     "{\"event\":\"first\"}"
             );
 
             OutboxEvent second = new OutboxEvent(
-                    "TRANSACTION",
+                    TEST_AGGREGATE_TYPE,
                     UUID.randomUUID(),
                     "TRANSFER_COMPLETED",
                     "{\"event\":\"second\"}"
@@ -139,8 +145,20 @@ class OutboxEventRepositoryConcurrencyTest {
             executor.awaitTermination(5, TimeUnit.SECONDS);
 
             transaction.executeWithoutResult(status ->
-                    repository.deleteAllInBatch()
+                    cleanUpTestEvents()
             );
         }
+    }
+
+    private void cleanUpTestEvents() {
+        repository.findAll().stream()
+                .filter(event -> TEST_AGGREGATE_TYPE.equals(
+                        event.getAggregateType()
+                ))
+                .map(OutboxEvent::getId)
+                .toList()
+                .forEach(repository::deleteById);
+
+        repository.flush();
     }
 }
