@@ -8,6 +8,7 @@ import com.finflow.transaction_service.domain.transaction.TransferRequest;
 import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.IdempotencyKeyConflictException;
 import com.finflow.transaction_service.exception.InsufficientFundsException;
+import com.finflow.transaction_service.exception.InvalidTransferException;
 import com.finflow.transaction_service.service.OwnerIdentityService;
 import com.finflow.transaction_service.service.TransferService;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +17,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -388,6 +390,177 @@ class TransferControllerTest {
                     """))
                 .andDo(print())
                 .andExpect(status().isConflict());
+    }
+
+    // -----------------------------------------------------------------
+    // Error contract (A1 / M1)
+    // -----------------------------------------------------------------
+
+    private static final String VALID_BODY = """
+        {
+          "sourceAccountId": "11111111-1111-1111-1111-111111111111",
+          "destinationAccountId": "22222222-2222-2222-2222-222222222222",
+          "amount": 200.00
+        }
+        """;
+
+    @Test
+    void shouldReturn400WhenIdempotencyKeyHeaderIsMissing() throws Exception {
+        mockMvc.perform(post("/transfers")
+                        .with(userToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value(
+                        org.hamcrest.Matchers.containsString("Idempotency-Key")))
+                .andExpect(jsonPath("$.path").value("/transfers"));
+
+        verifyNoInteractions(transferService);
+    }
+
+    @Test
+    void shouldReturn400WhenBodyIsMalformedJson() throws Exception {
+        mockMvc.perform(post("/transfers")
+                        .with(userToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", "malformed-001")
+                        .content("{ not json"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.path").value("/transfers"));
+
+        verifyNoInteractions(transferService);
+    }
+
+    @Test
+    void shouldRejectAmountWithMoreThanTwoDecimals() throws Exception {
+        String request = """
+        {
+          "sourceAccountId": "%s",
+          "destinationAccountId": "%s",
+          "amount": 10.123
+        }
+        """.formatted(UUID.randomUUID(), UUID.randomUUID());
+
+        mockMvc.perform(post("/transfers")
+                        .with(userToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request)
+                        .header("Idempotency-Key", "scale-001"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Request validation failed"))
+                .andExpect(jsonPath("$.fieldErrors.amount").exists());
+
+        verifyNoInteractions(transferService);
+    }
+
+    @Test
+    void shouldRejectAmountWithTooManyIntegerDigits() throws Exception {
+        String request = """
+        {
+          "sourceAccountId": "%s",
+          "destinationAccountId": "%s",
+          "amount": 1234567890123456.00
+        }
+        """.formatted(UUID.randomUUID(), UUID.randomUUID());
+
+        mockMvc.perform(post("/transfers")
+                        .with(userToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request)
+                        .header("Idempotency-Key", "magnitude-001"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.amount").exists());
+
+        verifyNoInteractions(transferService);
+    }
+
+    @Test
+    void shouldReturn422WhenTransferIsInvalid() throws Exception {
+        when(transferService.transfer(any(TransferRequest.class), any(UUID.class)))
+                .thenThrow(new InvalidTransferException(
+                        "Source and destination currencies must match"
+                ));
+
+        mockMvc.perform(post("/transfers")
+                        .with(userToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", "invalid-transfer-001")
+                        .content(VALID_BODY))
+                .andExpect(status().is(422))
+                .andExpect(jsonPath("$.status").value(422))
+                .andExpect(jsonPath("$.error").value("Unprocessable Content"))
+                .andExpect(jsonPath("$.message").value(
+                        "Source and destination currencies must match"))
+                .andExpect(jsonPath("$.path").value("/transfers"));
+    }
+
+    @Test
+    void shouldReturn400WhenIdempotencyKeyIsRejectedByDomain() throws Exception {
+        when(transferService.transfer(any(TransferRequest.class), any(UUID.class)))
+                .thenThrow(new IllegalArgumentException(
+                        "Idempotency-Key must not exceed 100 characters"
+                ));
+
+        mockMvc.perform(post("/transfers")
+                        .with(userToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", "x".repeat(101))
+                        .content(VALID_BODY))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(
+                        "Idempotency-Key must not exceed 100 characters"));
+    }
+
+    @Test
+    void shouldReturn409OnUnresolvedDataIntegrityViolation() throws Exception {
+        when(transferService.transfer(any(TransferRequest.class), any(UUID.class)))
+                .thenThrow(new DataIntegrityViolationException(
+                        "ERROR: duplicate key value violates unique constraint"
+                ));
+
+        mockMvc.perform(post("/transfers")
+                        .with(userToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", "integrity-001")
+                        .content(VALID_BODY))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.message").value(
+                        "Request conflicts with existing data"));
+    }
+
+    @Test
+    void shouldReturnGeneric500WithoutInternalDetails() throws Exception {
+        when(transferService.transfer(any(TransferRequest.class), any(UUID.class)))
+                .thenThrow(new IllegalStateException(
+                        "Failed to serialize transfer completed event"
+                ));
+
+        mockMvc.perform(post("/transfers")
+                        .with(userToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", "unexpected-001")
+                        .content(VALID_BODY))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.status").value(500))
+                .andExpect(jsonPath("$.error").value("Internal Server Error"))
+                .andExpect(jsonPath("$.message").value("An unexpected error occurred"))
+                .andExpect(jsonPath("$.path").value("/transfers"))
+                .andExpect(jsonPath("$.fieldErrors").isEmpty());
+    }
+
+    @Test
+    void shouldReturn405ForUnsupportedMethodUsingErrorContract() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/transfers")
+                        .with(userToken()))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.status").value(405))
+                .andExpect(jsonPath("$.path").value("/transfers"));
     }
 
 }

@@ -58,7 +58,7 @@ The project uses a single Git repository with independently deployable Spring Bo
 - REST API for accounts and transfers
 - Transaction management and rollback
 - Pessimistic row locking with deterministic lock ordering for concurrent transfers
-- Idempotency support
+- Idempotency support (replay returns the original transaction; concurrent duplicates resolved safely)
 - Account-level authorization: the owner is derived from the JWT, never from the request body
 - PostgreSQL persistence
 - Flyway database migrations
@@ -125,6 +125,22 @@ http://localhost:8080/swagger-ui/index.html
   - `GET /accounts/{id}` returns `404` for accounts of other owners (the same response as for a nonexistent ID, so account IDs cannot be probed).
   - `POST /transfers` requires the source account to belong to the caller (`403` otherwise). Transfers to accounts of other owners are allowed.
   - An idempotency key can only be replayed by the owner who created the transaction (`403` otherwise), so a foreign key cannot be used to read someone else's transaction.
+
+## Error Contract
+
+All errors share the same JSON body (`timestamp`, `status`, `error`, `message`, `path`, `fieldErrors`):
+
+| Status | When |
+|---:|---|
+| `400` | Bean validation failures (per-field messages in `fieldErrors`), malformed JSON, missing `Idempotency-Key` header, invalid key length |
+| `401` | Missing or invalid token |
+| `403` | Source account or replayed transaction not owned by the caller |
+| `404` | Unknown account / owner, or an account the caller does not own |
+| `409` | Same `Idempotency-Key` with different transfer data, or an unresolved uniqueness conflict |
+| `422` | Business-rule violations: insufficient funds, currency mismatch, same source and destination |
+| `500` | Unexpected failure; the message is generic and the cause is only logged |
+
+Amounts accept at most 15 integer digits and 2 decimals.
 
 ## Testing
 
@@ -231,11 +247,11 @@ roadmap unless required by a new feature or a correctness issue.
 
 ### 5. API and Error Handling
 
--   [ ] Standardize HTTP error responses for domain validation failures
+-   [x] Standardize HTTP error responses for domain validation failures
     and persistence conflicts.
--   [ ] Return appropriate status codes for invalid requests and
+-   [x] Return appropriate status codes for invalid requests and
     idempotency-key conflicts.
--   [ ] Add controller integration tests for error response contracts.
+-   [x] Add controller integration tests for error response contracts.
 
 ### 6. Testing Infrastructure
 

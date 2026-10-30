@@ -21,9 +21,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.math.BigDecimal;
 import java.util.Optional;
@@ -61,7 +66,8 @@ class TransferServiceTest {
                 transactionRepository,
                 eventPublisher,
                 outboxEventRepository,
-                new ObjectMapper()
+                new ObjectMapper(),
+                new NoOpTransactionManager()
         );
 
         sourceAccountId = UUID.randomUUID();
@@ -718,6 +724,212 @@ class TransferServiceTest {
                 transferService.transfer(request, UUID.randomUUID())
         )
                 .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void shouldReturnExistingTransactionFoundAfterAcquiringLocks() {
+        Account sourceAccount = createAccount("FF-SOURCE14", "ARS");
+        Account destinationAccount = createAccount("FF-DESTIN14", "ARS");
+
+        sourceAccount.deposit(new BigDecimal("500.00"));
+
+        Transaction committedByOtherRequest = new Transaction(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "ARS",
+                "race-after-lock-001"
+        );
+        committedByOtherRequest.markAsCompleted();
+
+        // First lookup: nothing yet. Second lookup (after the row locks):
+        // the concurrent request has committed in the meantime.
+        when(transactionRepository.findByIdempotencyKey("race-after-lock-001"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(committedByOtherRequest));
+
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+        when(accountRepository.findById(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "race-after-lock-001"
+        );
+
+        Transaction result = transferService.transfer(request, ownerId);
+
+        assertThat(result).isSameAs(committedByOtherRequest);
+        assertThat(sourceAccount.getBalance())
+                .isEqualByComparingTo("500.00");
+
+        verify(accountRepository, never()).save(any(Account.class));
+        verify(transactionRepository, never()).save(any(Transaction.class));
+        verify(outboxEventRepository, never()).save(any(OutboxEvent.class));
+    }
+
+    @Test
+    void shouldReturnWinningTransactionWhenIdempotencyRaceIsLost() {
+        Account sourceAccount = createAccount("FF-SOURCE15", "ARS");
+        Account destinationAccount = createAccount("FF-DESTIN15", "ARS");
+
+        sourceAccount.deposit(new BigDecimal("500.00"));
+
+        Transaction winner = new Transaction(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "ARS",
+                "race-lost-001"
+        );
+        winner.markAsCompleted();
+
+        // Both lookups inside the unit of work miss; the insert then fails
+        // on the unique constraint; the recovery lookup finds the winner.
+        when(transactionRepository.findByIdempotencyKey("race-lost-001"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+        when(accountRepository.findById(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        when(transactionRepository.save(any(Transaction.class)))
+                .thenThrow(new DataIntegrityViolationException(
+                        "duplicate key value violates unique constraint "
+                                + "uk_transactions_idempotency_key"
+                ));
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "race-lost-001"
+        );
+
+        Transaction result = transferService.transfer(request, ownerId);
+
+        assertThat(result).isSameAs(winner);
+
+        verify(outboxEventRepository, never()).save(any(OutboxEvent.class));
+        verify(eventPublisher, never()).publishEvent(
+                any(TransferCompletedEvent.class)
+        );
+    }
+
+    @Test
+    void shouldRejectLostRaceReplayWhenRequesterDoesNotOwnWinner() {
+        Account sourceAccount = createAccount("FF-SOURCE16", "ARS");
+        Account destinationAccount = createAccount("FF-DESTIN16", "ARS");
+
+        sourceAccount.deposit(new BigDecimal("500.00"));
+
+        Transaction winner = new Transaction(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "ARS",
+                "race-lost-foreign-001"
+        );
+        winner.markAsCompleted();
+
+        when(transactionRepository.findByIdempotencyKey("race-lost-foreign-001"))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(winner));
+
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+
+        when(transactionRepository.save(any(Transaction.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate key"));
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "race-lost-foreign-001"
+        );
+
+        // When the winner is re-read, its source account turns out to be
+        // owned by someone else: the recovery path must enforce ownership
+        // exactly like a regular replay does.
+        Account foreignSource = new Account(
+                new AccountNumber("FF-FOREIGN1"),
+                "ARS",
+                UUID.randomUUID()
+        );
+        when(accountRepository.findById(sourceAccountId))
+                .thenReturn(Optional.of(foreignSource));
+
+        assertThatThrownBy(() -> transferService.transfer(request, ownerId))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void shouldPropagateIntegrityViolationUnrelatedToIdempotency() {
+        Account sourceAccount = createAccount("FF-SOURCE17", "ARS");
+        Account destinationAccount = createAccount("FF-DESTIN17", "ARS");
+
+        sourceAccount.deposit(new BigDecimal("500.00"));
+
+        when(transactionRepository.findByIdempotencyKey("other-violation-001"))
+                .thenReturn(Optional.empty());
+
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+
+        DataIntegrityViolationException violation =
+                new DataIntegrityViolationException("some other constraint");
+
+        when(transactionRepository.save(any(Transaction.class)))
+                .thenThrow(violation);
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "other-violation-001"
+        );
+
+        assertThatThrownBy(() -> transferService.transfer(request, ownerId))
+                .isSameAs(violation);
+    }
+
+    /**
+     * Transaction manager that performs no real transaction handling, so
+     * the service can be exercised with plain mocks.
+     */
+    private static final class NoOpTransactionManager
+            implements PlatformTransactionManager {
+
+        @Override
+        public TransactionStatus getTransaction(TransactionDefinition definition) {
+            return new SimpleTransactionStatus();
+        }
+
+        @Override
+        public void commit(TransactionStatus status) {
+            // no-op
+        }
+
+        @Override
+        public void rollback(TransactionStatus status) {
+            // no-op
+        }
     }
 
     private Account createAccount(

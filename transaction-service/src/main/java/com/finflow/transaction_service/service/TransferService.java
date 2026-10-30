@@ -14,9 +14,11 @@ import com.finflow.transaction_service.repository.AccountRepository;
 import com.finflow.transaction_service.repository.OutboxEventRepository;
 import com.finflow.transaction_service.repository.TransactionRepository;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -29,19 +31,22 @@ public class TransferService {
     private final ApplicationEventPublisher eventPublisher;
     private final OutboxEventRepository outboxEventRepository;
     private final ObjectMapper objectMapper;
+    private final TransactionTemplate transactionTemplate;
 
     public TransferService(
             AccountRepository accountRepository,
             TransactionRepository transactionRepository,
             ApplicationEventPublisher eventPublisher,
             OutboxEventRepository outboxEventRepository,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            PlatformTransactionManager transactionManager
     ) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
         this.eventPublisher = eventPublisher;
         this.outboxEventRepository = outboxEventRepository;
         this.objectMapper = objectMapper;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     /**
@@ -50,8 +55,13 @@ public class TransferService {
      * The source account must belong to the requesting owner; otherwise an
      * {@link AccessDeniedException} is thrown. The same rule applies to the
      * idempotent replay of an existing transaction.
+     *
+     * <p>The unit of work runs in its own database transaction. If two
+     * requests with the same idempotency key race and both reach the insert,
+     * the loser fails on {@code uk_transactions_idempotency_key} at commit;
+     * that failure is caught here and resolved by returning the winner, so
+     * the caller observes the same idempotent response either way.
      */
-    @Transactional
     public Transaction transfer(TransferRequest request,
                                 UUID requestingOwnerId) {
 
@@ -62,6 +72,22 @@ public class TransferService {
         }
 
         validateRequest(request);
+
+        try {
+            return transactionTemplate.execute(status ->
+                    doTransfer(request, requestingOwnerId)
+            );
+        } catch (DataIntegrityViolationException exception) {
+            return recoverFromIdempotencyRace(
+                    request,
+                    requestingOwnerId,
+                    exception
+            );
+        }
+    }
+
+    private Transaction doTransfer(TransferRequest request,
+                                   UUID requestingOwnerId) {
 
         Transaction existingTransaction = findExistingTransaction(request);
 
@@ -81,6 +107,15 @@ public class TransferService {
         } else {
             destinationAccount = getAccountForUpdate(destinationId);
             sourceAccount = getAccountForUpdate(sourceId);
+        }
+
+        // A concurrent request with the same key may have committed while
+        // this one was waiting for the row locks. Re-check before debiting
+        // so the unique constraint is only the last line of defense.
+        existingTransaction = findExistingTransaction(request);
+
+        if (existingTransaction != null) {
+            return replay(existingTransaction, request, requestingOwnerId);
         }
 
         assertOwnsAccount(sourceAccount, requestingOwnerId);
@@ -129,6 +164,24 @@ public class TransferService {
         assertOwnsExistingTransaction(existingTransaction, requestingOwnerId);
         validateIdempotencyReuse(existingTransaction, request);
         return existingTransaction;
+    }
+
+    /**
+     * Called when the unit of work was rolled back by a constraint
+     * violation. If a transaction now exists for the key, another request
+     * won the race and its result is the idempotent answer for this one.
+     * Any other integrity violation is propagated untouched.
+     */
+    private Transaction recoverFromIdempotencyRace(
+            TransferRequest request,
+            UUID requestingOwnerId,
+            DataIntegrityViolationException cause
+    ) {
+        Transaction winner = transactionRepository
+                .findByIdempotencyKey(request.idempotencyKey())
+                .orElseThrow(() -> cause);
+
+        return replay(winner, request, requestingOwnerId);
     }
 
     private Transaction findExistingTransaction(TransferRequest request) {
