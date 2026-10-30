@@ -35,19 +35,40 @@
 
   "users": [
     {
-      "username": "lcrouzeilles",
-      "email": "lrcrouzeilles@hotmail.com",
+      "username": "demo-user",
+      "email": "demo-user@example.com",
+      "firstName": "Demo",
+      "lastName": "User",
       "enabled": true,
       "emailVerified": true,
       "credentials": [
         {
           "type": "password",
-          "value": "admin",
+          "value": "demo-user",
           "temporary": false
         }
       ],
       "realmRoles": [
         "USER"
+      ]
+    },
+    {
+      "username": "demo-admin",
+      "email": "demo-admin@example.com",
+      "firstName": "Demo",
+      "lastName": "Admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo-admin",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "USER",
+        "ADMIN"
       ]
     }
   ]

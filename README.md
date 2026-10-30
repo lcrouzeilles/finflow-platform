@@ -84,6 +84,28 @@ The Transaction Service is accessible internally through:
 http://transaction-service:8080
 ```
 
+## Configuration
+
+Local secrets live in a git-ignored `.env` file read by Docker Compose. Create it from the template and adjust the values:
+
+```bash
+cp .env.example .env
+```
+
+| Variable | Used by |
+|---|---|
+| `DB_USERNAME`, `DB_PASSWORD` | PostgreSQL and the Transaction Service |
+| `KC_BOOTSTRAP_ADMIN_USERNAME`, `KC_BOOTSTRAP_ADMIN_PASSWORD` | Keycloak admin console |
+
+`keycloak/finflow-realm.json` is imported on the first start of Keycloak and contains only generic demo identities, no real users:
+
+| Username | Password | Realm roles |
+|---|---|---|
+| `demo-user` | `demo-user` | `USER` |
+| `demo-admin` | `demo-admin` | `USER`, `ADMIN` |
+
+Keycloak does not resolve environment placeholders inside imported user credentials, so these demo passwords are literal; they are for the local environment only. The realm is imported once: after changing the file, recreate the Keycloak volume (`docker compose down -v` removes all local data) for the changes to apply. The `finflow-client` public client has Direct Access Grants enabled (password grant) to simplify local testing; this is a development convenience and should be disabled outside local environments.
+
 ## Running
 
 Start the complete platform from the repository root:
@@ -157,6 +179,14 @@ If Maven cannot download dependencies on Windows because an antivirus or proxy i
 
 ```powershell
 $env:MAVEN_OPTS = "-Djavax.net.ssl.trustStoreType=WINDOWS-ROOT"
+```
+
+## Sharing a Snapshot
+
+Create archives from Git so that `.env`, `.git/`, `target/` and IDE metadata are never included:
+
+```bash
+git archive --format=zip --output finflow-$(git rev-parse --short HEAD).zip HEAD
 ```
 
 ## Roadmap
@@ -282,10 +312,10 @@ roadmap unless required by a new feature or a correctness issue.
     credentials.
 -   [x] Keep test-only configuration exclusively in test resources.
 -   [ ] Remove redundant database indexes after validating query plans.
--   [ ] Pin infrastructure image versions and review container health
+-   [x] Pin infrastructure image versions and review container health
     checks.
--   [ ] Separate development credentials from deployment configuration.
--   [ ] Exclude local secrets, IDE metadata, Git metadata, and generated
+-   [x] Separate development credentials from deployment configuration.
+-   [x] Exclude local secrets, IDE metadata, Git metadata, and generated
     build artifacts from source handoffs.
 
 ### 9. Documentation
