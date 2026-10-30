@@ -33,6 +33,8 @@ class TransferCacheListenerTest {
 
         TransferCompletedEvent event =
                 new TransferCompletedEvent(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
                         sourceAccountId,
                         destinationAccountId
                 );
@@ -50,6 +52,8 @@ class TransferCacheListenerTest {
 
         TransferCompletedEvent event =
                 new TransferCompletedEvent(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
                         UUID.randomUUID(),
                         UUID.randomUUID()
                 );

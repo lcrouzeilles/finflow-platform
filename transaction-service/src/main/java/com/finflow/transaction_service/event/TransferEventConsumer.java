@@ -16,7 +16,10 @@ public class TransferEventConsumer {
     @KafkaListener(topics = "finflow.transfer.completed", groupId = "finflow-transfer-consumer")
     public void consume(TransferCompletedEvent event) {
         log.info(
-                "Received transfer completed event: sourceAccountId={}, destinationAccountId={}",
+                "Received transfer completed event: eventId={}, transactionId={}, "
+                        + "sourceAccountId={}, destinationAccountId={}",
+                event.eventId(),
+                event.transactionId(),
                 event.sourceAccountId(),
                 event.destinationAccountId()
         );

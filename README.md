@@ -9,21 +9,18 @@ The project focuses on modern backend engineering, security, distributed systems
 ## Architecture
 
 ```text
-Client
-  │
-  ▼
-API Gateway
-  │
-  ▼
-Transaction Service
-  │
-  ▼
-PostgreSQL
+Client ──JWT──► API Gateway ──► Transaction Service ──► PostgreSQL
+                                   │        │              (accounts, transactions, outbox_events)
+                                   │        └──► Redis (account cache, graceful degradation)
+                                   │
+                                   └── Outbox publisher ──► Kafka (finflow.transfer.completed)
 
-Keycloak ──► JWT Authentication
+Keycloak ──► issues the JWTs validated by the gateway and the service
 ```
 
 The API Gateway is the public entry point. The Transaction Service runs internally and is not directly exposed when using Docker.
+
+Every state change and its event are committed in the same database transaction (transactional outbox); a background publisher relays the events to Kafka with at-least-once semantics.
 
 ## Repository
 
@@ -48,6 +45,8 @@ The project uses a single Git repository with independently deployable Spring Bo
 - PostgreSQL
 - Spring Data JPA / Hibernate
 - Flyway
+- Redis (Spring Cache)
+- Apache Kafka (Spring for Apache Kafka)
 - OpenAPI / Swagger
 - Docker / Docker Compose
 - Testcontainers
@@ -60,6 +59,9 @@ The project uses a single Git repository with independently deployable Spring Bo
 - Pessimistic row locking with deterministic lock ordering for concurrent transfers
 - Idempotency support (replay returns the original transaction; concurrent duplicates resolved safely)
 - Account-level authorization: the owner is derived from the JWT, never from the request body
+- Transactional outbox with lease-based claiming, exponential backoff, retry limit and metrics
+- Kafka publication of transfer events
+- Redis account cache with graceful degradation
 - PostgreSQL persistence
 - Flyway database migrations
 - JWT authentication and role-based authorization
@@ -76,6 +78,8 @@ The project uses a single Git repository with independently deployable Spring Bo
 | API Gateway | `8080` | `8080` |
 | Keycloak | `8081` | `8080` |
 | PostgreSQL | `55433` | `5432` |
+| Redis | `6379` | `6379` |
+| Kafka (external listener) | `9094` | `9094` |
 | Transaction Service | — | `8080` |
 
 The Transaction Service is accessible internally through:
@@ -164,6 +168,15 @@ All errors share the same JSON body (`timestamp`, `status`, `error`, `message`, 
 
 Amounts accept at most 15 integer digits and 2 decimals.
 
+## Transactional Outbox and Delivery Guarantees
+
+- The transfer, the ledger row and the `outbox_events` row are written in one database transaction.
+- A scheduled publisher claims pending events with `FOR UPDATE SKIP LOCKED` and a lease (`claim_until`), publishes them to Kafka (keyed by `sourceAccountId`, synchronous ack) and marks them published.
+- Failures are retried with exponential backoff (1s, 2s, ... capped at 300s). After `finflow.outbox.max-attempts` (default `10`) failed attempts the event is marked terminally failed (`failed_at`) and stops being retried; it stays in the table for inspection and manual repair.
+- A failure on one event, including a failure to record its status after the lease expired, never aborts the rest of the batch.
+- Delivery is **at least once**: an event delivered to Kafka whose status update fails is delivered again. Consumers must deduplicate on `eventId`; the payload also carries `transactionId` for correlation.
+- Metrics: the counter `finflow.outbox.events` is tagged with `result=published|failed|exhausted|status_update_failed`.
+
 ## Testing
 
 Integration tests start disposable PostgreSQL and Redis containers with Testcontainers, so the only prerequisite is a running Docker daemon. No local database, fixed port or `.env` is needed:
@@ -204,12 +217,12 @@ git archive --format=zip --output finflow-$(git rev-parse --short HEAD).zip HEAD
 - [x] Monorepo structure
 - [x] CI/CD with GitHub Actions
 - [x] Redis
+- [x] Kafka
+- [x] Transactional Outbox (lease, backoff, retry limit, metrics)
 - [x] Account-level authorization (Keycloak identity → owner)
 - [x] Testcontainers-based integration tests
 
 ### Next
-- [ ] Kafka
-- [ ] Transactional Outbox
 - [ ] Kubernetes
 - [ ] Observability
 - [ ] Cloud deployment
@@ -251,20 +264,22 @@ roadmap unless required by a new feature or a correctness issue.
 
 ### 3. Transactional Outbox Reliability
 
--   [ ] Implement a maximum retry policy for repeatedly failing outbox
+-   [x] Implement a maximum retry policy for repeatedly failing outbox
     events.
--   [ ] Introduce terminal failure handling or a dead-letter mechanism
+-   [x] Introduce terminal failure handling or a dead-letter mechanism
     for events that exceed the retry limit.
 -   [ ] Provide an operational mechanism to inspect, repair, and replay
-    failed events.
+    failed events. *(Terminally failed events are kept in
+    `outbox_events` with `failed_at` set; no admin endpoint yet.)*
 -   [ ] Add monitoring for pending events, retry counts, publication
-    failures, and event processing delays.
+    failures, and event processing delays. *(Partial: publisher result
+    counters exist; no gauges for backlog age or alerts yet.)*
 -   [ ] Expand failure-recovery tests to cover process crashes, Kafka
     timeouts, and lease expiration.
 
 ### 4. Event-Driven Architecture
 
--   [ ] Include stable event IDs and transaction IDs in event payloads
+-   [x] Include stable event IDs and transaction IDs in event payloads
     to support deduplication and workflow correlation.
 -   [ ] Introduce event schema versioning and compatibility rules as
     additional event types are added.
@@ -272,7 +287,7 @@ roadmap unless required by a new feature or a correctness issue.
     deduplication.
 -   [ ] Test duplicate message delivery and relevant out-of-order
     processing scenarios.
--   [ ] Document the at-least-once delivery guarantee and the
+-   [x] Document the at-least-once delivery guarantee and the
     possibility of duplicate events.
 
 ### 5. API and Error Handling
@@ -298,7 +313,8 @@ roadmap unless required by a new feature or a correctness issue.
 -   [ ] Add structured logging with transaction IDs, event IDs, and
     correlation IDs.
 -   [ ] Introduce metrics for transfer processing, outbox publication,
-    retry activity, and consumer failures.
+    retry activity, and consumer failures. *(Partial: outbox publication
+    counters only.)*
 -   [ ] Add distributed tracing across the API gateway, transaction
     service, and asynchronous workflows.
 -   [ ] Define alerts for stuck outbox events and repeated publication
@@ -311,7 +327,7 @@ roadmap unless required by a new feature or a correctness issue.
 -   [ ] Make PostgreSQL health checks use the configured database
     credentials.
 -   [x] Keep test-only configuration exclusively in test resources.
--   [ ] Remove redundant database indexes after validating query plans.
+-   [x] Remove redundant database indexes after validating query plans.
 -   [x] Pin infrastructure image versions and review container health
     checks.
 -   [x] Separate development credentials from deployment configuration.
@@ -320,7 +336,7 @@ roadmap unless required by a new feature or a correctness issue.
 
 ### 9. Documentation
 
--   [ ] Document the transactional outbox flow, retry policy, lease
+-   [x] Document the transactional outbox flow, retry policy, lease
     recovery, and delivery guarantees.
 -   [ ] Document the Saga state machine, failure handling, and
     compensating actions.

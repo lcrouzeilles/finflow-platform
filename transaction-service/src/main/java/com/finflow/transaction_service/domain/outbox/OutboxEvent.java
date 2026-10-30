@@ -12,6 +12,9 @@ import java.util.UUID;
 @Table(name = "outbox_events")
 public class OutboxEvent {
 
+    /** Upper bound of the exponential backoff between retries. */
+    static final long MAX_BACKOFF_SECONDS = 300L;
+
     @Id
     private UUID id;
 
@@ -32,6 +35,13 @@ public class OutboxEvent {
 
     @Column(name = "published_at")
     private Instant publishedAt;
+
+    /**
+     * Set when the event exhausted its retry budget. Terminal: the event is
+     * no longer claimable and needs operator intervention.
+     */
+    @Column(name = "failed_at")
+    private Instant failedAt;
 
     @Column(nullable = false)
     private int attempts;
@@ -58,7 +68,24 @@ public class OutboxEvent {
             String eventType,
             String payload
     ) {
-        this.id = UUID.randomUUID();
+        this(UUID.randomUUID(), aggregateType, aggregateId, eventType, payload);
+    }
+
+    /**
+     * Creates an event with a caller-supplied ID so the same ID can be
+     * embedded in the payload (consumers deduplicate on it).
+     */
+    public OutboxEvent(
+            UUID id,
+            String aggregateType,
+            UUID aggregateId,
+            String eventType,
+            String payload
+    ) {
+        if (id == null) {
+            throw new IllegalArgumentException("Event ID cannot be null");
+        }
+        this.id = id;
         this.aggregateType = aggregateType;
         this.aggregateId = aggregateId;
         this.eventType = eventType;
@@ -74,17 +101,50 @@ public class OutboxEvent {
         clearClaim();
     }
 
+    /**
+     * Records a failed attempt and schedules the next one with exponential
+     * backoff (1s, 2s, 4s, ... capped at {@value #MAX_BACKOFF_SECONDS}s).
+     * Never becomes terminal; see {@link #markFailed(String, int)}.
+     */
     public void markFailed(String error) {
+        markFailed(error, Integer.MAX_VALUE);
+    }
+
+    /**
+     * Records a failed attempt. When the number of attempts reaches
+     * {@code maxAttempts} the event becomes terminal ({@link #getFailedAt()}
+     * set, no next attempt) and is excluded from claiming.
+     *
+     * @return {@code true} if this failure exhausted the retry budget
+     */
+    public boolean markFailed(String error, int maxAttempts) {
+        if (maxAttempts <= 0) {
+            throw new IllegalArgumentException(
+                    "Max attempts must be positive"
+            );
+        }
+
         this.attempts++;
+        this.lastError = error;
+        clearClaim();
+
+        if (this.attempts >= maxAttempts) {
+            this.failedAt = Instant.now();
+            this.nextAttemptAt = null;
+            return true;
+        }
 
         long delaySeconds = Math.min(
-                300L,
+                MAX_BACKOFF_SECONDS,
                 1L << Math.min(this.attempts - 1, 9)
         );
 
         this.nextAttemptAt = Instant.now().plusSeconds(delaySeconds);
-        this.lastError = error;
-        clearClaim();
+        return false;
+    }
+
+    public boolean isExhausted() {
+        return failedAt != null;
     }
 
     public void claim(String workerId, Instant until) {

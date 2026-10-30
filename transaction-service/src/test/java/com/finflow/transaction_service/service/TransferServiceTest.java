@@ -932,6 +932,45 @@ class TransferServiceTest {
         }
     }
 
+    @Test
+    void shouldEmbedOutboxEventIdAndTransactionIdInPayload() {
+        Account sourceAccount = createAccount("FF-SOURCE18", "ARS");
+        Account destinationAccount = createAccount("FF-DESTIN18", "ARS");
+
+        sourceAccount.deposit(new BigDecimal("500.00"));
+
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "payload-ids-001"
+        );
+
+        stubTransactionSave();
+        Transaction saved = transferService.transfer(request, ownerId);
+
+        verify(outboxEventRepository).save(
+                argThat(event ->
+                        event.getPayload().contains(
+                                "\"eventId\":\"" + event.getId() + "\"")
+                                && event.getPayload().contains(
+                                "\"transactionId\":\"" + saved.getId() + "\"")
+                                && event.getAggregateId().equals(saved.getId())
+                )
+        );
+
+        verify(eventPublisher).publishEvent(
+                argThat((TransferCompletedEvent e) ->
+                        e.transactionId().equals(saved.getId())
+                                && e.eventId() != null)
+        );
+    }
+
     private Account createAccount(
             String accountNumber,
             String currency

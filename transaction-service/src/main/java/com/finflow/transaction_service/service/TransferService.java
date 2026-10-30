@@ -131,12 +131,20 @@ public class TransferService {
 
         Transaction savedTransaction = transactionRepository.save(transaction);
 
+        // The outbox event ID travels inside the payload so consumers can
+        // deduplicate at-least-once deliveries; the transaction ID allows
+        // correlation with the ledger.
+        UUID eventId = UUID.randomUUID();
+
         TransferCompletedEvent event = new TransferCompletedEvent(
+                eventId,
+                savedTransaction.getId(),
                 request.sourceAccountId(),
                 request.destinationAccountId()
         );
 
         OutboxEvent outboxEvent = new OutboxEvent(
+                eventId,
                 "TRANSACTION",
                 savedTransaction.getId(),
                 "TRANSFER_COMPLETED",
@@ -145,8 +153,8 @@ public class TransferService {
 
         outboxEventRepository.save(outboxEvent);
 
-        // Temporary: preserve the existing Kafka flow until the
-        // Outbox publisher is implemented.
+        // Kafka delivery goes through the outbox. The in-process event is
+        // still needed for the AFTER_COMMIT cache eviction listener.
         eventPublisher.publishEvent(event);
 
         return savedTransaction;

@@ -19,6 +19,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class OutboxEventStatusServiceTest {
 
+    private static final int MAX_ATTEMPTS = 3;
+
     @Mock
     private OutboxEventRepository repository;
 
@@ -26,7 +28,7 @@ class OutboxEventStatusServiceTest {
 
     @BeforeEach
     void setUp() {
-        statusService = new OutboxEventStatusService(repository);
+        statusService = new OutboxEventStatusService(repository, MAX_ATTEMPTS);
     }
 
     @Test
@@ -88,6 +90,61 @@ class OutboxEventStatusServiceTest {
         assertThatThrownBy(() ->
                 statusService.markPublished(eventId, "worker-1")
         ).isInstanceOf(RuntimeException.class);
+    }
+
+
+    @Test
+    void shouldReportExhaustionWhenMaxAttemptsIsReached() {
+        String workerId = "worker-1";
+        OutboxEvent event = createClaimedEvent(workerId);
+
+        when(repository.findById(event.getId()))
+                .thenReturn(Optional.of(event));
+
+        for (int attempt = 1; attempt < MAX_ATTEMPTS; attempt++) {
+            boolean exhausted = statusService.markFailed(
+                    event.getId(), workerId, "Kafka unavailable");
+
+            assertThat(exhausted).isFalse();
+            assertThat(event.isExhausted()).isFalse();
+            assertThat(event.getNextAttemptAt()).isNotNull();
+
+            // The next worker re-claims it before the next attempt.
+            event.claim(workerId, Instant.now().plusSeconds(180));
+        }
+
+        boolean exhausted = statusService.markFailed(
+                event.getId(), workerId, "Kafka still unavailable");
+
+        assertThat(exhausted).isTrue();
+        assertThat(event.isExhausted()).isTrue();
+        assertThat(event.getAttempts()).isEqualTo(MAX_ATTEMPTS);
+        assertThat(event.getFailedAt()).isNotNull();
+        assertThat(event.getNextAttemptAt()).isNull();
+        assertThat(event.getPublishedAt()).isNull();
+    }
+
+    @Test
+    void shouldRejectStatusUpdatesOnTerminallyFailedEvent() {
+        String workerId = "worker-1";
+        OutboxEvent event = createClaimedEvent(workerId);
+        event.markFailed("boom", 1);
+        event.claim(workerId, Instant.now().plusSeconds(180));
+
+        when(repository.findById(event.getId()))
+                .thenReturn(Optional.of(event));
+
+        assertThatThrownBy(() ->
+                statusService.markPublished(event.getId(), workerId)
+        ).isInstanceOf(IllegalStateException.class);
+
+        assertThat(event.getPublishedAt()).isNull();
+    }
+
+    @Test
+    void shouldRejectNonPositiveMaxAttempts() {
+        assertThatThrownBy(() -> new OutboxEventStatusService(repository, 0))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     private OutboxEvent createClaimedEvent(String workerId) {

@@ -81,4 +81,45 @@ class OutboxEventRepositoryTest extends AbstractIntegrationTest {
         assertThat(published.getClaimedBy()).isNull();
         assertThat(published.getClaimUntil()).isNull();
     }
+
+    @Test
+    void shouldNotClaimTerminallyFailedEvents() {
+        OutboxEvent pending = new OutboxEvent(
+                "TRANSACTION", UUID.randomUUID(), "TRANSFER_COMPLETED", "{}");
+
+        OutboxEvent exhausted = new OutboxEvent(
+                "TRANSACTION", UUID.randomUUID(), "TRANSFER_COMPLETED", "{}");
+        exhausted.markFailed("gave up", 1);
+
+        repository.saveAndFlush(pending);
+        repository.saveAndFlush(exhausted);
+
+        var claimable = repository.findClaimableForUpdate(
+                Instant.now().plusSeconds(1), 100);
+
+        assertThat(claimable)
+                .extracting(OutboxEvent::getId)
+                .contains(pending.getId())
+                .doesNotContain(exhausted.getId());
+
+        assertThat(repository.countByFailedAtIsNotNull())
+                .isGreaterThanOrEqualTo(1);
+        assertThat(repository.countByPublishedAtIsNullAndFailedAtIsNull())
+                .isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    void shouldPersistTerminalFailure() {
+        OutboxEvent event = new OutboxEvent(
+                "TRANSACTION", UUID.randomUUID(), "TRANSFER_COMPLETED", "{}");
+        event.markFailed("gave up", 1);
+
+        OutboxEvent saved = repository.saveAndFlush(event);
+        OutboxEvent retrieved = repository.findById(saved.getId()).orElseThrow();
+
+        assertThat(retrieved.getFailedAt()).isNotNull();
+        assertThat(retrieved.isExhausted()).isTrue();
+        assertThat(retrieved.getNextAttemptAt()).isNull();
+        assertThat(retrieved.getLastError()).isEqualTo("gave up");
+    }
 }

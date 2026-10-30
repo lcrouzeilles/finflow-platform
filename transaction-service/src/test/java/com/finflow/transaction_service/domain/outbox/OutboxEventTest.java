@@ -75,6 +75,57 @@ class OutboxEventTest {
                 .isAfterOrEqualTo(nextAttempt);
     }
 
+    @Test
+    void shouldBecomeTerminalWhenMaxAttemptsIsReached() {
+        OutboxEvent event = createEvent();
+
+        assertThat(event.markFailed("first", 2)).isFalse();
+        assertThat(event.isExhausted()).isFalse();
+        assertThat(event.getFailedAt()).isNull();
+        assertThat(event.getNextAttemptAt()).isNotNull();
+
+        assertThat(event.markFailed("second", 2)).isTrue();
+        assertThat(event.isExhausted()).isTrue();
+        assertThat(event.getFailedAt()).isNotNull();
+        assertThat(event.getNextAttemptAt()).isNull();
+        assertThat(event.getAttempts()).isEqualTo(2);
+        assertThat(event.getLastError()).isEqualTo("second");
+        assertThat(event.getClaimedBy()).isNull();
+    }
+
+    @Test
+    void shouldNeverBecomeTerminalWithoutMaxAttempts() {
+        OutboxEvent event = createEvent();
+
+        for (int i = 0; i < 50; i++) {
+            event.markFailed("Kafka unavailable");
+        }
+
+        assertThat(event.isExhausted()).isFalse();
+        assertThat(event.getAttempts()).isEqualTo(50);
+        assertThat(event.getNextAttemptAt()).isNotNull();
+    }
+
+    @Test
+    void shouldRejectNonPositiveMaxAttempts() {
+        OutboxEvent event = createEvent();
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> event.markFailed("x", 0)
+        ).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void shouldUseCallerSuppliedId() {
+        UUID id = UUID.randomUUID();
+
+        OutboxEvent event = new OutboxEvent(
+                id, "TRANSACTION", UUID.randomUUID(), "TRANSFER_COMPLETED", "{}"
+        );
+
+        assertThat(event.getId()).isEqualTo(id);
+    }
+
     private OutboxEvent createEvent() {
         return new OutboxEvent(
                 "TRANSACTION",

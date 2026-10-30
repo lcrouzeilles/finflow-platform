@@ -11,10 +11,18 @@ import java.util.UUID;
 
 public interface OutboxEventRepository
         extends JpaRepository<OutboxEvent, UUID> {
+
+    /**
+     * Claims up to {@code batchSize} pending events (not published, not
+     * terminally failed, lease expired or absent, backoff elapsed) for the
+     * current transaction. {@code SKIP LOCKED} lets concurrent workers take
+     * disjoint batches.
+     */
     @Query(value = """
     SELECT *
     FROM outbox_events
     WHERE published_at IS NULL
+      AND failed_at IS NULL
       AND (claim_until IS NULL OR claim_until < :now)
       AND (next_attempt_at IS NULL OR next_attempt_at <= :now)
     ORDER BY created_at
@@ -25,4 +33,8 @@ public interface OutboxEventRepository
             @Param("now") Instant now,
             @Param("batchSize") int batchSize
     );
+
+    long countByPublishedAtIsNullAndFailedAtIsNull();
+
+    long countByFailedAtIsNotNull();
 }

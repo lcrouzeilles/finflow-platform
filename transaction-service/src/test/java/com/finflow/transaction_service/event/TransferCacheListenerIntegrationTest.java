@@ -43,6 +43,8 @@ class TransferCacheListenerIntegrationTest extends AbstractIntegrationTest {
 
         TransferCompletedEvent event =
                 new TransferCompletedEvent(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
                         sourceAccountId,
                         destinationAccountId
                 );
@@ -71,6 +73,8 @@ class TransferCacheListenerIntegrationTest extends AbstractIntegrationTest {
 
         TransferCompletedEvent event =
                 new TransferCompletedEvent(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
                         sourceAccountId,
                         destinationAccountId
                 );
