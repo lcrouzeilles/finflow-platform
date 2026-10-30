@@ -14,6 +14,7 @@ import com.finflow.transaction_service.repository.AccountRepository;
 import com.finflow.transaction_service.repository.OutboxEventRepository;
 import com.finflow.transaction_service.repository.TransactionRepository;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,15 +44,29 @@ public class TransferService {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * Executes a transfer on behalf of {@code requestingOwnerId}, which must
+     * be derived from the authenticated token (never from the request body).
+     * The source account must belong to the requesting owner; otherwise an
+     * {@link AccessDeniedException} is thrown. The same rule applies to the
+     * idempotent replay of an existing transaction.
+     */
     @Transactional
-    public Transaction transfer(TransferRequest request) {
+    public Transaction transfer(TransferRequest request,
+                                UUID requestingOwnerId) {
+
+        if (requestingOwnerId == null) {
+            throw new IllegalArgumentException(
+                    "Authenticated owner ID is required"
+            );
+        }
+
         validateRequest(request);
 
         Transaction existingTransaction = findExistingTransaction(request);
 
         if (existingTransaction != null) {
-            validateIdempotencyReuse(existingTransaction, request);
-            return existingTransaction;
+            return replay(existingTransaction, request, requestingOwnerId);
         }
 
         Account sourceAccount;
@@ -67,6 +82,8 @@ public class TransferService {
             destinationAccount = getAccountForUpdate(destinationId);
             sourceAccount = getAccountForUpdate(sourceId);
         }
+
+        assertOwnsAccount(sourceAccount, requestingOwnerId);
 
         validateAccounts(sourceAccount, destinationAccount);
 
@@ -100,12 +117,59 @@ public class TransferService {
         return savedTransaction;
     }
 
+    /**
+     * Idempotent replay: the existing transaction is returned only to the
+     * owner that created it and only for an identical payload.
+     */
+    private Transaction replay(
+            Transaction existingTransaction,
+            TransferRequest request,
+            UUID requestingOwnerId
+    ) {
+        assertOwnsExistingTransaction(existingTransaction, requestingOwnerId);
+        validateIdempotencyReuse(existingTransaction, request);
+        return existingTransaction;
+    }
+
     private Transaction findExistingTransaction(TransferRequest request) {
         validateIdempotencyKey(request.idempotencyKey());
 
         return transactionRepository
                 .findByIdempotencyKey(request.idempotencyKey())
                 .orElse(null);
+    }
+
+    private void assertOwnsAccount(
+            Account account,
+            UUID requestingOwnerId
+    ) {
+        if (!requestingOwnerId.equals(account.getOwnerId())) {
+            throw new AccessDeniedException(
+                    "You are not authorized to transfer from this account"
+            );
+        }
+    }
+
+    /**
+     * An idempotency key is only replayable by the owner of the source
+     * account of the transaction it created. Otherwise a foreign key would
+     * leak the transaction of another owner.
+     */
+    private void assertOwnsExistingTransaction(
+            Transaction transaction,
+            UUID requestingOwnerId
+    ) {
+        Account sourceAccount = accountRepository
+                .findById(transaction.getSourceAccountId())
+                .orElseThrow(() -> new AccessDeniedException(
+                        "You are not authorized to access this transaction"
+                ));
+
+        if (!requestingOwnerId.equals(sourceAccount.getOwnerId())) {
+            throw new AccessDeniedException(
+                    "You are not authorized to access this transaction"
+            );
+        }
     }
 
     private void executeTransfer(

@@ -56,6 +56,7 @@ The project uses a single Git repository with independently deployable Spring Bo
 - Transaction management and rollback
 - Pessimistic row locking with deterministic lock ordering for concurrent transfers
 - Idempotency support
+- Account-level authorization: the owner is derived from the JWT, never from the request body
 - PostgreSQL persistence
 - Flyway database migrations
 - JWT authentication and role-based authorization
@@ -112,6 +113,16 @@ Swagger UI:
 http://localhost:8080/swagger-ui/index.html
 ```
 
+## Security Model
+
+- Authentication is delegated to Keycloak. The gateway and the service both validate the JWT; realm roles become `ROLE_USER` / `ROLE_ADMIN`.
+- Identity mapping: the `sub` claim of the token is bound to an application `Owner` (`owners.keycloak_subject`, unique). An owner is provisioned automatically on the first authenticated request.
+- Ownership is enforced in the service layer and derived from the token only:
+  - `POST /accounts` creates the account for the authenticated owner; any `ownerId` in the body is ignored.
+  - `GET /accounts/{id}` returns `404` for accounts of other owners (the same response as for a nonexistent ID, so account IDs cannot be probed).
+  - `POST /transfers` requires the source account to belong to the caller (`403` otherwise). Transfers to accounts of other owners are allowed.
+  - An idempotency key can only be replayed by the owner who created the transaction (`403` otherwise), so a foreign key cannot be used to read someone else's transaction.
+
 ## Roadmap
 
 ### Completed
@@ -127,6 +138,7 @@ http://localhost:8080/swagger-ui/index.html
 - [x] Monorepo structure
 - [x] CI/CD with GitHub Actions
 - [x] Redis
+- [x] Account-level authorization (Keycloak identity → owner)
 
 ### Next
 - [ ] Kafka
@@ -161,11 +173,11 @@ roadmap unless required by a new feature or a correctness issue.
 
 ### 2. Security and Authorization
 
--   [ ] Implement account-level authorization to ensure users can only
+-   [x] Implement account-level authorization to ensure users can only
     access and manage accounts they own, unless explicitly authorized as
     administrators.
--   [ ] Map Keycloak identities to application-level owners.
--   [ ] Add integration tests for unauthorized account access and
+-   [x] Map Keycloak identities to application-level owners.
+-   [x] Add integration tests for unauthorized account access and
     cross-user operations.
 -   [ ] Review security configuration before deploying outside the local
     development environment.

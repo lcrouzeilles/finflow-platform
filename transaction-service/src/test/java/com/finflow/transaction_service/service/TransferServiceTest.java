@@ -21,6 +21,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -72,7 +73,7 @@ class TransferServiceTest {
     @Test
     void shouldRejectNullTransferRequest() {
         assertThatThrownBy(() ->
-                transferService.transfer(null)
+                transferService.transfer(null, ownerId)
         )
                 .isInstanceOf(InvalidTransferException.class)
                 .hasMessage("Transfer request cannot be null");
@@ -91,7 +92,7 @@ class TransferServiceTest {
         );
 
         assertThatThrownBy(() ->
-                transferService.transfer(request)
+                transferService.transfer(request, ownerId)
         )
                 .isInstanceOf(InvalidTransferException.class)
                 .hasMessage("Source account ID cannot be null");
@@ -110,7 +111,7 @@ class TransferServiceTest {
         );
 
         assertThatThrownBy(() ->
-                transferService.transfer(request)
+                transferService.transfer(request, ownerId)
         )
                 .isInstanceOf(InvalidTransferException.class)
                 .hasMessage("Destination account ID cannot be null");
@@ -129,7 +130,7 @@ class TransferServiceTest {
         );
 
         assertThatThrownBy(() ->
-                transferService.transfer(request)
+                transferService.transfer(request, ownerId)
         )
                 .isInstanceOf(InvalidTransferException.class)
                 .hasMessage(
@@ -168,7 +169,7 @@ class TransferServiceTest {
         );
 
         stubTransactionSave();
-        transferService.transfer(request);
+        transferService.transfer(request, ownerId);
 
         verify(accountRepository).findByIdForUpdate(sourceAccountId);
     }
@@ -199,7 +200,7 @@ class TransferServiceTest {
         );
 
         stubTransactionSave();
-        transferService.transfer(request);
+        transferService.transfer(request, ownerId);
 
         verify(accountRepository).findByIdForUpdate(destinationAccountId);
     }
@@ -223,7 +224,7 @@ class TransferServiceTest {
                 "transfer-test-001"
         );
 
-        assertThatThrownBy(() -> transferService.transfer(request))
+        assertThatThrownBy(() -> transferService.transfer(request, ownerId))
                 .isInstanceOf(AccountNotFoundException.class)
                 .hasMessage("Account not found with id: " + sourceAccountId);
 
@@ -254,7 +255,7 @@ class TransferServiceTest {
                 "transfer-test-001"
         );
 
-        assertThatThrownBy(() -> transferService.transfer(request))
+        assertThatThrownBy(() -> transferService.transfer(request, ownerId))
                 .isInstanceOf(AccountNotFoundException.class)
                 .hasMessage(
                         "Account not found with id: " + destinationAccountId
@@ -292,7 +293,7 @@ class TransferServiceTest {
         );
 
         assertThatThrownBy(() ->
-                transferService.transfer(request)
+                transferService.transfer(request, ownerId)
         )
                 .isInstanceOf(InvalidTransferException.class)
                 .hasMessage(
@@ -331,7 +332,7 @@ class TransferServiceTest {
         );
 
         stubTransactionSave();
-        transferService.transfer(request);
+        transferService.transfer(request, ownerId);
 
         assertThat(
                 sourceAccount.getBalance()
@@ -393,7 +394,7 @@ class TransferServiceTest {
         );
 
         assertThatThrownBy(() ->
-                transferService.transfer(request)
+                transferService.transfer(request, ownerId)
         )
                 .isInstanceOf(InvalidTransferException.class)
                 .hasMessage(
@@ -414,7 +415,7 @@ class TransferServiceTest {
         );
 
         assertThatThrownBy(() ->
-                transferService.transfer(request)
+                transferService.transfer(request, ownerId)
         )
                 .isInstanceOf(InvalidTransferException.class)
                 .hasMessage("Transfer amount must be greater than zero");
@@ -433,7 +434,7 @@ class TransferServiceTest {
         );
 
         assertThatThrownBy(() ->
-                transferService.transfer(request)
+                transferService.transfer(request, ownerId)
         )
                 .isInstanceOf(InvalidTransferException.class)
                 .hasMessage("Transfer amount must be greater than zero");
@@ -471,7 +472,7 @@ class TransferServiceTest {
                 .thenReturn(Optional.of(destinationAccount));
 
         assertThatThrownBy(() ->
-                transferService.transfer(request)
+                transferService.transfer(request, ownerId)
         )
                 .isInstanceOf(InsufficientFundsException.class)
                 .hasMessageContaining("Insufficient funds");
@@ -509,13 +510,214 @@ class TransferServiceTest {
                 "transfer-rejected-test"
         );
 
-        assertThatThrownBy(() -> transferService.transfer(request))
+        assertThatThrownBy(() -> transferService.transfer(request, ownerId))
                 .isInstanceOf(InsufficientFundsException.class);
 
         verify(outboxEventRepository, never()).save(any(OutboxEvent.class));
         verify(eventPublisher, never()).publishEvent(
                 any(TransferCompletedEvent.class)
         );
+    }
+
+    @Test
+    void shouldRejectNullRequestingOwner() {
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "transfer-test-001"
+        );
+
+        assertThatThrownBy(() ->
+                transferService.transfer(request, null)
+        )
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Authenticated owner ID is required");
+
+        verifyNoInteractions(accountRepository);
+        verifyNoInteractions(transactionRepository);
+    }
+
+    @Test
+    void shouldRejectTransferFromAccountNotOwnedByRequester() {
+        Account sourceAccount = createAccount("FF-SOURCE09", "ARS");
+        Account destinationAccount = createAccount("FF-DESTIN09", "ARS");
+
+        sourceAccount.deposit(new BigDecimal("500.00"));
+
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "cross-owner-test-001"
+        );
+
+        UUID anotherOwnerId = UUID.randomUUID();
+
+        assertThatThrownBy(() ->
+                transferService.transfer(request, anotherOwnerId)
+        )
+                .isInstanceOf(AccessDeniedException.class);
+
+        assertThat(sourceAccount.getBalance())
+                .isEqualByComparingTo("500.00");
+        assertThat(destinationAccount.getBalance())
+                .isEqualByComparingTo("0.00");
+
+        verify(accountRepository, never()).save(any(Account.class));
+        verify(transactionRepository, never()).save(any(Transaction.class));
+        verify(outboxEventRepository, never()).save(any(OutboxEvent.class));
+        verify(eventPublisher, never()).publishEvent(
+                any(TransferCompletedEvent.class)
+        );
+    }
+
+    @Test
+    void shouldAllowTransferToAccountOwnedByAnotherOwner() {
+        Account sourceAccount = createAccount("FF-SOURCE10", "ARS");
+
+        Account destinationAccount = new Account(
+                new AccountNumber("FF-DESTIN10"),
+                "ARS",
+                UUID.randomUUID()
+        );
+
+        sourceAccount.deposit(new BigDecimal("500.00"));
+
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "transfer-to-other-owner-001"
+        );
+
+        stubTransactionSave();
+        transferService.transfer(request, ownerId);
+
+        assertThat(sourceAccount.getBalance())
+                .isEqualByComparingTo("400.00");
+        assertThat(destinationAccount.getBalance())
+                .isEqualByComparingTo("100.00");
+    }
+
+    @Test
+    void shouldReturnExistingTransactionOnReplayByItsOwner() {
+        Account sourceAccount = createAccount("FF-SOURCE11", "ARS");
+
+        Transaction existing = new Transaction(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "ARS",
+                "replay-test-001"
+        );
+        existing.markAsCompleted();
+
+        when(transactionRepository.findByIdempotencyKey("replay-test-001"))
+                .thenReturn(Optional.of(existing));
+
+        when(accountRepository.findById(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "replay-test-001"
+        );
+
+        Transaction result = transferService.transfer(request, ownerId);
+
+        assertThat(result).isSameAs(existing);
+
+        verify(accountRepository, never()).findByIdForUpdate(any());
+        verify(accountRepository, never()).save(any(Account.class));
+        verify(transactionRepository, never()).save(any(Transaction.class));
+        verify(outboxEventRepository, never()).save(any(OutboxEvent.class));
+    }
+
+    @Test
+    void shouldRejectReplayOfTransactionOwnedByAnotherOwner() {
+        Account sourceAccount = createAccount("FF-SOURCE12", "ARS");
+
+        Transaction existing = new Transaction(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "ARS",
+                "foreign-replay-001"
+        );
+        existing.markAsCompleted();
+
+        when(transactionRepository.findByIdempotencyKey("foreign-replay-001"))
+                .thenReturn(Optional.of(existing));
+
+        when(accountRepository.findById(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "foreign-replay-001"
+        );
+
+        UUID anotherOwnerId = UUID.randomUUID();
+
+        assertThatThrownBy(() ->
+                transferService.transfer(request, anotherOwnerId)
+        )
+                .isInstanceOf(AccessDeniedException.class);
+
+        verify(accountRepository, never()).findByIdForUpdate(any());
+        verify(accountRepository, never()).save(any(Account.class));
+        verify(transactionRepository, never()).save(any(Transaction.class));
+    }
+
+    @Test
+    void shouldCheckReplayOwnershipBeforeDetectingIdempotencyConflict() {
+        Account sourceAccount = createAccount("FF-SOURCE13", "ARS");
+
+        Transaction existing = new Transaction(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("100.00"),
+                "ARS",
+                "foreign-conflict-001"
+        );
+        existing.markAsCompleted();
+
+        when(transactionRepository.findByIdempotencyKey("foreign-conflict-001"))
+                .thenReturn(Optional.of(existing));
+
+        when(accountRepository.findById(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        // Different amount: the owner would get a 409, a stranger gets 403
+        // so the key cannot be probed for its original payload.
+        TransferRequest request = new TransferRequest(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("999.00"),
+                "foreign-conflict-001"
+        );
+
+        assertThatThrownBy(() ->
+                transferService.transfer(request, UUID.randomUUID())
+        )
+                .isInstanceOf(AccessDeniedException.class);
     }
 
     private Account createAccount(

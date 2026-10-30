@@ -2,33 +2,56 @@ package com.finflow.transaction_service.api.transaction;
 
 import com.finflow.transaction_service.api.transfer.CreateTransferRequest;
 import com.finflow.transaction_service.api.transfer.TransferController;
+import com.finflow.transaction_service.config.SecurityConfig;
 import com.finflow.transaction_service.domain.transaction.Transaction;
 import com.finflow.transaction_service.domain.transaction.TransferRequest;
 import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.IdempotencyKeyConflictException;
 import com.finflow.transaction_service.exception.InsufficientFundsException;
+import com.finflow.transaction_service.service.OwnerIdentityService;
 import com.finflow.transaction_service.service.TransferService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Runs against the real {@link SecurityConfig} (JWT resource server, roles)
+ * so that the {@code @AuthenticationPrincipal Jwt} resolution and the
+ * 401/403 contract are exercised end to end at the MVC layer.
+ */
 @WebMvcTest(TransferController.class)
+@Import(SecurityConfig.class)
 class TransferControllerTest {
+
+    private static final String SUBJECT = "keycloak-subject-001";
 
     @Autowired
     private MockMvc mockMvc;
@@ -39,11 +62,32 @@ class TransferControllerTest {
     @MockitoBean
     private TransferService transferService;
 
+    @MockitoBean
+    private OwnerIdentityService ownerIdentityService;
+
+    @MockitoBean
+    private JwtDecoder jwtDecoder;
+
+    private UUID requestingOwnerId;
+
+    private static RequestPostProcessor userToken() {
+        return jwt()
+                .jwt(jwt -> jwt.subject(SUBJECT))
+                .authorities(new SimpleGrantedAuthority("ROLE_USER"));
+    }
+
+    @BeforeEach
+    void setUp() {
+        requestingOwnerId = UUID.randomUUID();
+
+        when(ownerIdentityService.resolveOwnerId(any(Jwt.class)))
+                .thenReturn(requestingOwnerId);
+    }
+
     @Test
     void shouldCreateTransfer() throws Exception {
         UUID sourceAccountId = UUID.randomUUID();
         UUID destinationAccountId = UUID.randomUUID();
-        UUID transactionId = UUID.randomUUID();
 
         CreateTransferRequest request = new CreateTransferRequest(
                 sourceAccountId,
@@ -61,11 +105,12 @@ class TransferControllerTest {
 
         transaction.markAsCompleted();
 
-        when(transferService.transfer(any(TransferRequest.class)))
+        when(transferService.transfer(any(TransferRequest.class), any(UUID.class)))
                 .thenReturn(transaction);
 
         mockMvc.perform(
                         post("/transfers")
+                                .with(userToken())
                                 .contentType(APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsString(request))
                                 .header("Idempotency-Key", "controller-success-001")
@@ -84,6 +129,96 @@ class TransferControllerTest {
     }
 
     @Test
+    void shouldPassOwnerResolvedFromTokenToService() throws Exception {
+        UUID sourceAccountId = UUID.randomUUID();
+        UUID destinationAccountId = UUID.randomUUID();
+
+        Transaction transaction = new Transaction(
+                sourceAccountId,
+                destinationAccountId,
+                new BigDecimal("10.00"),
+                "ARS",
+                "owner-from-token-001"
+        );
+        transaction.markAsCompleted();
+
+        when(transferService.transfer(any(TransferRequest.class), any(UUID.class)))
+                .thenReturn(transaction);
+
+        mockMvc.perform(
+                        post("/transfers")
+                                .with(userToken())
+                                .contentType(APPLICATION_JSON)
+                                .content("""
+                                {
+                                  "sourceAccountId": "%s",
+                                  "destinationAccountId": "%s",
+                                  "amount": 10.00
+                                }
+                                """.formatted(sourceAccountId, destinationAccountId))
+                                .header("Idempotency-Key", "owner-from-token-001")
+                )
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<Jwt> jwtCaptor = ArgumentCaptor.forClass(Jwt.class);
+        verify(ownerIdentityService).resolveOwnerId(jwtCaptor.capture());
+        assertThat(jwtCaptor.getValue().getSubject()).isEqualTo(SUBJECT);
+
+        ArgumentCaptor<TransferRequest> requestCaptor =
+                ArgumentCaptor.forClass(TransferRequest.class);
+        verify(transferService).transfer(
+                requestCaptor.capture(),
+                eq(requestingOwnerId)
+        );
+        assertThat(requestCaptor.getValue().idempotencyKey())
+                .isEqualTo("owner-from-token-001");
+    }
+
+    @Test
+    void shouldReturn403WhenSourceAccountBelongsToAnotherOwner() throws Exception {
+        when(transferService.transfer(any(TransferRequest.class), any(UUID.class)))
+                .thenThrow(new AccessDeniedException(
+                        "You are not authorized to transfer from this account"
+                ));
+
+        mockMvc.perform(post("/transfers")
+                        .with(userToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", "cross-owner-001")
+                        .content("""
+                    {
+                      "sourceAccountId": "11111111-1111-1111-1111-111111111111",
+                      "destinationAccountId": "22222222-2222-2222-2222-222222222222",
+                      "amount": 200.00
+                    }
+                    """))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.error").value("Forbidden"))
+                .andExpect(jsonPath("$.message").value(
+                        "You are not authorized to transfer from this account"
+                ))
+                .andExpect(jsonPath("$.path").value("/transfers"));
+    }
+
+    @Test
+    void shouldRejectUnauthenticatedRequest() throws Exception {
+        mockMvc.perform(post("/transfers")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", "no-token-001")
+                        .content("""
+                    {
+                      "sourceAccountId": "11111111-1111-1111-1111-111111111111",
+                      "destinationAccountId": "22222222-2222-2222-2222-222222222222",
+                      "amount": 200.00
+                    }
+                    """))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(transferService);
+    }
+
+    @Test
     void shouldRejectRequestWithoutSourceAccountId() throws Exception {
         String request = """
         {
@@ -93,6 +228,7 @@ class TransferControllerTest {
         """.formatted(UUID.randomUUID());
 
         mockMvc.perform(post("/transfers")
+                        .with(userToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request)
                         .header("Idempotency-Key", "no-source-account-001"))
@@ -109,6 +245,7 @@ class TransferControllerTest {
         """.formatted(UUID.randomUUID());
 
         mockMvc.perform(post("/transfers")
+                        .with(userToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request)
                         .header("Idempotency-Key", "no-destination-account-001"))
@@ -125,6 +262,7 @@ class TransferControllerTest {
         """.formatted(UUID.randomUUID(), UUID.randomUUID());
 
         mockMvc.perform(post("/transfers")
+                        .with(userToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request)
                         .header("Idempotency-Key", "no-amount-001"))
@@ -142,6 +280,7 @@ class TransferControllerTest {
         """.formatted(UUID.randomUUID(), UUID.randomUUID());
 
         mockMvc.perform(post("/transfers")
+                        .with(userToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request)
                         .header("Idempotency-Key", "zero-amount-001"))
@@ -159,6 +298,7 @@ class TransferControllerTest {
         """.formatted(UUID.randomUUID(), UUID.randomUUID());
 
         mockMvc.perform(post("/transfers")
+                        .with(userToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request)
                         .header("Idempotency-Key", "negative-amount-001"))
@@ -178,7 +318,7 @@ class TransferControllerTest {
         }
         """.formatted(sourceAccountId, destinationAccountId);
 
-        when(transferService.transfer(any(TransferRequest.class)))
+        when(transferService.transfer(any(TransferRequest.class), any(UUID.class)))
                 .thenThrow(
                         new InsufficientFundsException(
                                 new BigDecimal("150.00"),
@@ -187,6 +327,7 @@ class TransferControllerTest {
                 );
 
         mockMvc.perform(post("/transfers")
+                        .with(userToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request)
                         .header("Idempotency-Key", "insufficient-funds-001"))
@@ -213,10 +354,11 @@ class TransferControllerTest {
         }
         """.formatted(sourceAccountId, destinationAccountId);
 
-        when(transferService.transfer(any(TransferRequest.class)))
+        when(transferService.transfer(any(TransferRequest.class), any(UUID.class)))
                 .thenThrow(new AccountNotFoundException(sourceAccountId));
 
         mockMvc.perform(post("/transfers")
+                        .with(userToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request)
                         .header("Idempotency-Key", "account-does-not-exist-001"))
@@ -228,12 +370,13 @@ class TransferControllerTest {
     void shouldReturn409WhenIdempotencyKeyConflicts()
             throws Exception {
 
-        when(transferService.transfer(any(TransferRequest.class)))
+        when(transferService.transfer(any(TransferRequest.class), any(UUID.class)))
                 .thenThrow(new IdempotencyKeyConflictException(
                         "Idempotency-Key was already used with different transfer data"
                 ));
 
         mockMvc.perform(post("/transfers")
+                        .with(userToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("Idempotency-Key", "controller-conflict-001")
                         .content("""

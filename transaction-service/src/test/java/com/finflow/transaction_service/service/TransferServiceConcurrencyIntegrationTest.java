@@ -92,10 +92,10 @@ class TransferServiceConcurrencyIntegrationTest {
 
         try {
             Future<TransferOutcome> first = executor.submit(() ->
-                    executeTransfer(firstRequest, ready, start));
+                    executeTransfer(firstRequest, ownerId, ready, start));
 
             Future<TransferOutcome> second = executor.submit(() ->
-                    executeTransfer(secondRequest, ready, start));
+                    executeTransfer(secondRequest, ownerId, ready, start));
 
             assertTrue(
                     ready.await(10, TimeUnit.SECONDS),
@@ -190,6 +190,7 @@ class TransferServiceConcurrencyIntegrationTest {
 
     private TransferOutcome executeTransfer(
             TransferRequest request,
+            UUID ownerId,
             CountDownLatch ready,
             CountDownLatch start
     ) {
@@ -206,7 +207,7 @@ class TransferServiceConcurrencyIntegrationTest {
                 );
             }
 
-            transferService.transfer(request);
+            transferService.transfer(request, ownerId);
             return new TransferOutcome(true, false, null);
 
         } catch (InsufficientFundsException exception) {

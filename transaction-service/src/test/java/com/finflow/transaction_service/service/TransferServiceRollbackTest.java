@@ -47,6 +47,7 @@ class TransferServiceRollbackTest {
 
     private UUID sourceAccountId;
     private UUID destinationAccountId;
+    private UUID sourceOwnerId;
 
     @BeforeEach
     void setUp() {
@@ -56,6 +57,8 @@ class TransferServiceRollbackTest {
 
         Owner sourceOwner = ownerRepository.save(new Owner());
         Owner destinationOwner = ownerRepository.save(new Owner());
+
+        sourceOwnerId = sourceOwner.getId();
 
         Account sourceAccount = new Account(
                 new AccountNumber("FF-SOURCE01"),
@@ -89,7 +92,7 @@ class TransferServiceRollbackTest {
                 "rollback-test-key"
         );
 
-        assertThatThrownBy(() -> transferService.transfer(request))
+        assertThatThrownBy(() -> transferService.transfer(request, sourceOwnerId))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage("Transaction persistence failed");
 

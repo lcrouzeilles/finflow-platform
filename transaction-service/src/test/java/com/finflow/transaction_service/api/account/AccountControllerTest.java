@@ -15,11 +15,14 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -44,17 +47,23 @@ class AccountControllerTest {
     @Autowired
     private AccountRepository accountRepository;
 
-    @Test
-    void shouldCreateAccount() throws Exception {
-        Owner owner = ownerRepository.saveAndFlush(new Owner());
+    private static RequestPostProcessor tokenFor(String subject) {
+        return jwt().jwt(jwt -> jwt.subject(subject));
+    }
 
-        CreateAccountRequest request = new CreateAccountRequest(
-                owner.getId(),
-                "ARS"
-        );
+    private Owner ownerWithSubject(String subject) {
+        return ownerRepository.saveAndFlush(new Owner(subject));
+    }
+
+    @Test
+    void shouldCreateAccountForAuthenticatedOwner() throws Exception {
+        Owner owner = ownerWithSubject("subject-create-001");
+
+        CreateAccountRequest request = new CreateAccountRequest("ARS");
 
         mockMvc.perform(
                         post("/accounts")
+                                .with(tokenFor("subject-create-001"))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsString(request))
                 )
@@ -69,33 +78,84 @@ class AccountControllerTest {
     }
 
     @Test
-    void shouldRejectRequestWithoutOwnerId() throws Exception {
-        String requestBody = """
-            {
-              "currency": "ARS"
-            }
-            """;
+    void shouldProvisionOwnerOnFirstAuthenticatedRequest() throws Exception {
+        String subject = "subject-first-time-001";
+
+        assertThat(ownerRepository.findByKeycloakSubject(subject)).isEmpty();
+
+        mockMvc.perform(
+                        post("/accounts")
+                                .with(tokenFor(subject))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                    {
+                                      "currency": "USD"
+                                    }
+                                    """)
+                )
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.ownerId").exists());
+
+        Owner provisioned = ownerRepository.findByKeycloakSubject(subject)
+                .orElseThrow();
+
+        assertThat(accountRepository.findAll())
+                .anySatisfy(account ->
+                        assertThat(account.getOwnerId())
+                                .isEqualTo(provisioned.getId())
+                );
+    }
+
+    @Test
+    void shouldIgnoreOwnerIdSuppliedInRequestBody() throws Exception {
+        Owner victim = ownerWithSubject("subject-victim-001");
+        Owner attacker = ownerWithSubject("subject-attacker-001");
+
+        mockMvc.perform(
+                        post("/accounts")
+                                .with(tokenFor("subject-attacker-001"))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                    {
+                                      "ownerId": "%s",
+                                      "currency": "ARS"
+                                    }
+                                    """.formatted(victim.getId()))
+                )
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.ownerId").value(attacker.getId().toString()));
+    }
+
+    @Test
+    void shouldRejectUnauthenticatedAccountCreation() throws Exception {
+        long accountsBefore = accountRepository.count();
 
         mockMvc.perform(
                         post("/accounts")
                                 .contentType(MediaType.APPLICATION_JSON)
-                                .content(requestBody)
+                                .content("""
+                                    {
+                                      "currency": "ARS"
+                                    }
+                                    """)
                 )
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.fieldErrors.ownerId").exists());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401));
+
+        assertThat(accountRepository.count()).isEqualTo(accountsBefore);
     }
 
     @Test
     void shouldRejectUnsupportedCurrency() throws Exception {
         String requestBody = """
             {
-              "ownerId": "7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45",
               "currency": "EUR"
             }
             """;
 
         mockMvc.perform(
                         post("/accounts")
+                                .with(tokenFor("subject-currency-001"))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(requestBody)
                 )
@@ -106,12 +166,12 @@ class AccountControllerTest {
     void shouldRejectRequestWithoutCurrency() throws Exception {
         String requestBody = """
             {
-              "ownerId": "7f3c2a91-6d84-4b17-9e52-1a6f8c3d0b45"
             }
             """;
 
         mockMvc.perform(
                         post("/accounts")
+                                .with(tokenFor("subject-currency-002"))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(requestBody)
                 )
@@ -126,30 +186,8 @@ class AccountControllerTest {
     }
 
     @Test
-    void shouldReturnNotFoundWhenOwnerDoesNotExist() throws Exception {
-        String requestBody = """
-            {
-              "ownerId": "11111111-1111-1111-1111-111111111111",
-              "currency": "ARS"
-            }
-            """;
-
-        mockMvc.perform(
-                        post("/accounts")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(requestBody)
-                )
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.status").value(404))
-                .andExpect(jsonPath("$.error").value("Not Found"))
-                .andExpect(jsonPath("$.message")
-                        .value("Owner not found with id: 11111111-1111-1111-1111-111111111111"))
-                .andExpect(jsonPath("$.path").value("/accounts"));
-    }
-
-    @Test
-    void shouldRetrieveAccountById() throws Exception {
-        Owner owner = ownerRepository.saveAndFlush(new Owner());
+    void shouldRetrieveOwnAccountById() throws Exception {
+        Owner owner = ownerWithSubject("subject-get-001");
 
         Account account = new Account(
                 new AccountNumber("FF-GET12345"),
@@ -159,7 +197,8 @@ class AccountControllerTest {
 
         Account savedAccount = accountRepository.saveAndFlush(account);
 
-        mockMvc.perform(get("/accounts/{accountId}", savedAccount.getId()))
+        mockMvc.perform(get("/accounts/{accountId}", savedAccount.getId())
+                        .with(tokenFor("subject-get-001")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id")
                         .value(savedAccount.getId().toString()))
@@ -176,12 +215,57 @@ class AccountControllerTest {
     }
 
     @Test
+    void shouldNotRevealAccountOwnedByAnotherOwner() throws Exception {
+        Owner owner = ownerWithSubject("subject-owner-001");
+        ownerWithSubject("subject-intruder-001");
+
+        Account savedAccount = accountRepository.saveAndFlush(
+                new Account(
+                        new AccountNumber("FF-IDOR1234"),
+                        "ARS",
+                        owner.getId()
+                )
+        );
+
+        // Same response as for a nonexistent account: the intruder learns
+        // nothing about the account (not even that the ID exists).
+        mockMvc.perform(get("/accounts/{accountId}", savedAccount.getId())
+                        .with(tokenFor("subject-intruder-001")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.message")
+                        .value("Account not found with id: "
+                                + savedAccount.getId()))
+                .andExpect(jsonPath("$.balance").doesNotExist())
+                .andExpect(jsonPath("$.accountNumber").doesNotExist())
+                .andExpect(jsonPath("$.ownerId").doesNotExist());
+    }
+
+    @Test
+    void shouldRejectUnauthenticatedAccountRetrieval() throws Exception {
+        Owner owner = ownerWithSubject("subject-get-002");
+
+        Account savedAccount = accountRepository.saveAndFlush(
+                new Account(
+                        new AccountNumber("FF-GET54321"),
+                        "ARS",
+                        owner.getId()
+                )
+        );
+
+        mockMvc.perform(get("/accounts/{accountId}", savedAccount.getId()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.balance").doesNotExist());
+    }
+
+    @Test
     void shouldReturnNotFoundWhenAccountDoesNotExist() throws Exception {
         UUID nonexistentAccountId = UUID.fromString(
                 "22222222-2222-2222-2222-222222222222"
         );
 
-        mockMvc.perform(get("/accounts/{accountId}", nonexistentAccountId))
+        mockMvc.perform(get("/accounts/{accountId}", nonexistentAccountId)
+                        .with(tokenFor("subject-get-003")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404))
                 .andExpect(jsonPath("$.error").value("Not Found"))

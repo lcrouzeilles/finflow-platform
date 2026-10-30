@@ -49,6 +49,26 @@ public class AccountService {
         return accountRepository.save(newAccount);
     }
 
+    /**
+     * Returns the account only if it belongs to {@code ownerId}. A
+     * non-owner gets the same {@link AccountNotFoundException} as for a
+     * nonexistent account, so the endpoint does not reveal whether the
+     * account ID exists.
+     */
+    public Account getOwnedAccount(UUID accountId, UUID ownerId) {
+        if (ownerId == null) {
+            throw new IllegalArgumentException("Owner ID cannot be null");
+        }
+
+        Account account = getAccount(accountId);
+
+        if (!ownerId.equals(account.getOwnerId())) {
+            throw new AccountNotFoundException(accountId);
+        }
+
+        return account;
+    }
+
     public Account getAccount(UUID accountId) {
         Cache cache = cacheManager.getCache("accounts");
 
