@@ -9,6 +9,7 @@ import com.finflow.transaction_service.payment.service.DepositNotFoundException;
 import com.finflow.transaction_service.payment.service.DepositService;
 import com.finflow.transaction_service.payment.service.InvalidDepositException;
 import com.finflow.transaction_service.payment.stripe.PaymentProviderException;
+import com.finflow.transaction_service.payment.stripe.PaymentProviderUnavailableException;
 import com.finflow.transaction_service.service.OwnerIdentityService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -247,6 +248,24 @@ class DepositControllerTest {
                 .andExpect(jsonPath("$.error").value("Bad Gateway"))
                 // Provider details never reach the client.
                 .andExpect(jsonPath("$.message").value("Payment provider rejected the request"));
+    }
+
+    @Test
+    void shouldReturn503WhenProviderIsUnavailable() throws Exception {
+        when(depositService.createDeposit(any(), any()))
+                .thenThrow(new PaymentProviderUnavailableException(
+                        "Payment provider is unavailable (circuit open)", null));
+
+        mockMvc.perform(post("/deposits")
+                        .with(userToken())
+                        .contentType(APPLICATION_JSON)
+                        .header("Idempotency-Key", "provider-down")
+                        .content(body("25.00", "USD")))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.status").value(503))
+                .andExpect(jsonPath("$.error").value("Service Unavailable"))
+                .andExpect(jsonPath("$.message").value("Payment provider unavailable, retry later"))
+                .andExpect(jsonPath("$.path").value("/deposits"));
     }
 
     @Test

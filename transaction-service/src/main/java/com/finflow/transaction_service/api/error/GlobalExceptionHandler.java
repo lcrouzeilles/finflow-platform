@@ -8,6 +8,7 @@ import com.finflow.transaction_service.exception.OwnerNotFoundException;
 import com.finflow.transaction_service.payment.service.DepositNotFoundException;
 import com.finflow.transaction_service.payment.service.InvalidDepositException;
 import com.finflow.transaction_service.payment.stripe.PaymentProviderException;
+import com.finflow.transaction_service.payment.stripe.PaymentProviderUnavailableException;
 import com.stripe.exception.SignatureVerificationException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.jspecify.annotations.Nullable;
@@ -165,6 +166,30 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpServletRequest request
     ) {
         return respond(HttpStatus.UNPROCESSABLE_CONTENT, exception.getMessage(), request);
+    }
+
+    /**
+     * The payment provider could not be reached within the retry policy or
+     * the circuit breaker is open. The client may retry later with the same
+     * Idempotency-Key; no deposit was recorded.
+     */
+    @ExceptionHandler(PaymentProviderUnavailableException.class)
+    public ResponseEntity<ApiErrorResponse> handlePaymentProviderUnavailable(
+            PaymentProviderUnavailableException exception,
+            HttpServletRequest request
+    ) {
+        log.warn(
+                "Payment provider unavailable on {} {}: {}",
+                request.getMethod(),
+                request.getRequestURI(),
+                exception.getMessage()
+        );
+
+        return respond(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "Payment provider unavailable, retry later",
+                request
+        );
     }
 
     /**
