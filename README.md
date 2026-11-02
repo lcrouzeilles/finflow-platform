@@ -10,10 +10,17 @@ The project focuses on modern backend engineering, security, distributed systems
 
 ```text
 Client ──JWT──► API Gateway ──► Transaction Service ──► PostgreSQL
-                                   │        │              (accounts, transactions, outbox_events)
-                                   │        └──► Redis (account cache, graceful degradation)
-                                   │
-                                   └── Outbox publisher ──► Kafka (finflow.transfer.completed)
+                     ▲             │        │              (accounts, transactions, deposits,
+                     │             │        │               outbox_events, processed_webhook_events,
+                     │             │        │               reconciliation_discrepancies)
+                     │             │        └──► Redis (account cache, graceful degradation)
+                     │             │
+                     │             ├── Outbox publisher ──► Kafka (finflow.transfer.completed,
+                     │             │                               finflow.deposit.completed)
+                     │             │
+                     │             └── Stripe client (retry + circuit breaker) ──► Stripe (test mode)
+                     │                                                               │
+Stripe ──signed webhook──► /webhooks/stripe ─────────────────────────────────────────┘
 
 Keycloak ──► issues the JWTs validated by the gateway and the service
 ```
@@ -21,6 +28,8 @@ Keycloak ──► issues the JWTs validated by the gateway and the service
 The API Gateway is the public entry point. The Transaction Service runs internally and is not directly exposed when using Docker.
 
 Every state change and its event are committed in the same database transaction (transactional outbox); a background publisher relays the events to Kafka with at-least-once semantics.
+
+Money enters the system only through Stripe Checkout: the service never sees card data, and a balance is credited only by a signature-verified, deduplicated webhook (see [Payments](#payments)).
 
 ## Repository
 
@@ -47,6 +56,7 @@ The project uses a single Git repository with independently deployable Spring Bo
 - Flyway
 - Redis (Spring Cache)
 - Apache Kafka (Spring for Apache Kafka)
+- Stripe (Checkout Sessions and webhooks, test mode) with Resilience4j
 - OpenAPI / Swagger
 - Docker / Docker Compose
 - Testcontainers
@@ -60,7 +70,11 @@ The project uses a single Git repository with independently deployable Spring Bo
 - Idempotency support (replay returns the original transaction; concurrent duplicates resolved safely)
 - Account-level authorization: the owner is derived from the JWT, never from the request body
 - Transactional outbox with lease-based claiming, exponential backoff, retry limit and metrics
-- Kafka publication of transfer events
+- Kafka publication of transfer and deposit events
+- Deposits through Stripe Checkout: hosted payment page, idempotent creation, owner-scoped
+- Signature-authenticated Stripe webhooks processed exactly once (dedup and credit in one transaction)
+- Retry, circuit breaker and timeouts around the Stripe client (503 contract when the provider is down)
+- Report-only reconciliation job between Stripe and the ledger
 - Redis account cache with graceful degradation
 - PostgreSQL persistence
 - Flyway database migrations
@@ -173,6 +187,8 @@ session this service never created, which is acknowledged and recorded as an
   - `GET /accounts/{id}` returns `404` for accounts of other owners (the same response as for a nonexistent ID, so account IDs cannot be probed).
   - `POST /transfers` requires the source account to belong to the caller (`403` otherwise). Transfers to accounts of other owners are allowed.
   - An idempotency key can only be replayed by the owner who created the transaction (`403` otherwise), so a foreign key cannot be used to read someone else's transaction.
+  - `POST /deposits` only funds accounts of the caller (`404` otherwise, like `GET /accounts/{id}`); `GET /deposits/{id}` hides deposits of other owners the same way, and a deposit idempotency key can only be replayed by its owner (`403`).
+- `POST /webhooks/stripe` carries no JWT. Its authentication is the `Stripe-Signature` header (HMAC over the exact bytes received, 5-minute tolerance); the gateway and the service permit the route and the service rejects anything unsigned with `400` before touching the database.
 
 ## Error Contract
 
@@ -180,13 +196,15 @@ All errors share the same JSON body (`timestamp`, `status`, `error`, `message`, 
 
 | Status | When |
 |---:|---|
-| `400` | Bean validation failures (per-field messages in `fieldErrors`), malformed JSON, missing `Idempotency-Key` header, invalid key length |
+| `400` | Bean validation failures (per-field messages in `fieldErrors`), malformed JSON, missing `Idempotency-Key` header, invalid key length, invalid or missing Stripe webhook signature |
 | `401` | Missing or invalid token |
-| `403` | Source account or replayed transaction not owned by the caller |
-| `404` | Unknown account / owner, or an account the caller does not own |
-| `409` | Same `Idempotency-Key` with different transfer data, or an unresolved uniqueness conflict |
-| `422` | Business-rule violations: insufficient funds, currency mismatch, same source and destination |
+| `403` | Source account, replayed transaction or replayed deposit not owned by the caller |
+| `404` | Unknown account / owner / deposit, or one the caller does not own |
+| `409` | Same `Idempotency-Key` with different transfer or deposit data, or an unresolved uniqueness conflict |
+| `422` | Business-rule violations: insufficient funds, currency mismatch, same source and destination, unsupported deposit currency, amount below the minimum or with more than 2 decimals, inactive account |
 | `500` | Unexpected failure; the message is generic and the cause is only logged |
+| `502` | The payment provider rejected the request (non-retryable error); the provider's message is only logged |
+| `503` | The payment provider is unreachable after the retry policy, or its circuit breaker is open: `Payment provider unavailable, retry later`. No deposit was recorded; retry with the same `Idempotency-Key` |
 
 Amounts accept at most 15 integer digits and 2 decimals.
 
@@ -198,6 +216,51 @@ Amounts accept at most 15 integer digits and 2 decimals.
 - A failure on one event, including a failure to record its status after the lease expired, never aborts the rest of the batch.
 - Delivery is **at least once**: an event delivered to Kafka whose status update fails is delivered again. Consumers must deduplicate on `eventId`; the payload also carries `transactionId` for correlation.
 - Metrics: the counter `finflow.outbox.events` is tagged with `result=published|failed|exhausted|status_update_failed`.
+
+## Payments
+
+Deposits are funded with Stripe Checkout in test mode. The flow has three legs, and only the second one moves money in the ledger:
+
+```text
+1. POST /deposits (JWT, Idempotency-Key)
+   validate ──► Stripe: create Checkout Session (idempotency key forwarded) ──► INSERT deposits PENDING
+   201 { depositId, checkoutUrl }          the row exists only once the session does
+
+2. Customer pays on Stripe's hosted page ──► Stripe ──signed──► POST /webhooks/stripe
+   verify Stripe-Signature ──► BEGIN
+                               INSERT processed_webhook_events (event_id) ON CONFLICT DO NOTHING  ── 0 rows: duplicate, 200
+                               SELECT deposits ... FOR UPDATE ──► SELECT accounts ... FOR UPDATE
+                               balance += amount; INSERT transactions (type DEPOSIT); deposit COMPLETED
+                               INSERT outbox_events (DEPOSIT_COMPLETED)
+                             COMMIT ──► evict account cache ──► 200
+
+3. Outbox publisher ──► Kafka finflow.deposit.completed (at least once, eventId for dedup)
+```
+
+**Golden rule.** The success redirect never credits anything; it is user experience, not truth. `GET /deposits/{id}` turns `COMPLETED` only after step 2. Deposits are `PENDING`, `COMPLETED`, `EXPIRED` (the session timed out unpaid) or `FAILED`.
+
+**PCI scope.** Card data is entered on Stripe's hosted page and never reaches this service (no card fields, no PAN, no tokens in logs or the database). That keeps the platform in SAQ-A territory: the service handles amounts, session ids and payment-intent ids only.
+
+**Idempotency, end to end.** The deposit id and the key sent to Stripe are derived from `(owner, Idempotency-Key)`, so a retried request sends byte-identical parameters and gets the same Checkout Session back instead of an idempotency error; two owners reusing a key cannot collide. Replaying a key returns the same deposit and URL for its owner (`403` for anyone else, `409` with different data), and concurrent duplicates resolve to one row, exactly like transfers.
+
+**Webhooks are processed exactly once.** Stripe delivers at least once and out of order. The handler claims the event id as the first statement of its transaction (`INSERT ... ON CONFLICT DO NOTHING`); zero rows inserted means a redelivery and the handler answers `200` without effects. The claim and the credit commit or roll back together, so a failure gives Stripe's retry a clean second attempt, and Postgres makes concurrent duplicates wait on the in-flight row, so exactly one of them credits (covered by a concurrency test). A paid session is credited only while the deposit is `PENDING` and only when the paid amount and currency match the request; already completed, expired or mismatched cases are acknowledged without a credit. Unknown sessions and amount mismatches are written to `reconciliation_discrepancies` because an acknowledged event is never redelivered. Unhandled event types are acknowledged too; only a genuine processing failure answers `5xx`, which Stripe retries.
+
+**Resilience.** The Stripe client runs as `Retry(CircuitBreaker(call))` (Resilience4j): 3 attempts with exponential backoff on network errors, 429, 5xx and Stripe's 409 "idempotent request in flight"; client errors (400, 401, 402, 403, idempotency key reuse) fail fast and do not trip the breaker. Transport timeouts are 3 s connect / 10 s read and the SDK's own retries are disabled so an outage is retried once per policy. An open breaker or exhausted retries answer `503` with no deposit left behind. Session creation and the reconciliation job use separate breaker instances (`stripe-checkout`, `stripe-reconciliation`), visible under `/actuator/metrics/resilience4j.circuitbreaker.state`. Tunables: `finflow.payments.stripe.resilience.*`.
+
+**Reconciliation (report only).** A daily job (`finflow.reconciliation.cron`, 03:00 by default) lists the Checkout Sessions Stripe created in a window ending 5 minutes before now (in-flight webhooks are not "lost") and starting 48 h + 1 h of overlap earlier, and compares them with local deposits:
+
+| Type | Meaning |
+|---|---|
+| `PAID_WITHOUT_LOCAL_COMPLETION` | Stripe reports the session paid; locally the deposit is missing or not `COMPLETED` (lost webhook) |
+| `COMPLETED_WITHOUT_PROVIDER_PAYMENT` | The deposit is `COMPLETED` locally but Stripe has no payment for it. Must never happen |
+| `AMOUNT_MISMATCH` | Paid and completed, but amount or currency differ |
+| `UNKNOWN_SESSION` | A webhook referenced a session this service never created (written by the webhook handler) |
+
+Findings are persisted (one row per type and session, reruns are idempotent), logged at `WARN` with their references and counted in `finflow.reconciliation.discrepancies` (tag `type`). The job never corrects anything: a paid session without a completed deposit usually means a lost webhook, but it can also be an amount mismatch or a session this service does not own, and crediting a balance automatically on that evidence would turn an observable inconsistency into a silent one. A human, or a deliberately designed repair tool, decides.
+
+**Configuration.** `STRIPE_SECRET_KEY` (`sk_test_...`) and `STRIPE_WEBHOOK_SECRET` (`whsec_...`) come from the environment only (see [Configuration](#configuration)); redirect URLs, timeouts and limits are `finflow.payments.*`. Deposits are USD only and at least `0.50` (`finflow.payments.supported-currencies`, `finflow.payments.minimum-amount`), and the deposit currency must match the account currency. CI never talks to Stripe: tests mock the gateway or run the real SDK over a fake transport. The manual smoke test with the Stripe CLI is described under [Running](#stripe-webhooks-local-smoke-test).
+
+**Future work (deliberately out of scope).** Subscriptions, payouts, refunds, KYC, multi-currency with conversion, a frontend beyond plain success/cancel pages, delayed payment methods (`checkout.session.async_payment_succeeded`), asynchronous webhook processing (the handler is a separate service so the controller can hand off to a worker), a Kafka consumer for `finflow.deposit.completed`, and an operator tool to resolve discrepancies.
 
 ## Testing
 
@@ -243,6 +306,7 @@ git archive --format=zip --output finflow-$(git rev-parse --short HEAD).zip HEAD
 - [x] Transactional Outbox (lease, backoff, retry limit, metrics)
 - [x] Account-level authorization (Keycloak identity → owner)
 - [x] Testcontainers-based integration tests
+- [x] Stripe deposits: Checkout, exactly-once webhooks, resilience, reconciliation
 
 ### Next
 - [ ] Kubernetes
@@ -366,6 +430,26 @@ roadmap unless required by a new feature or a correctness issue.
     and required infrastructure.
 -   [ ] Maintain an architecture decision record for significant design
     trade-offs.
+
+### 10. Payments
+
+-   [x] Deposits through Stripe Checkout with owner-scoped, idempotent
+    creation.
+-   [x] Signature-authenticated webhooks processed exactly once, with a
+    concurrent-duplicate test.
+-   [x] Retry, circuit breaker and timeouts around the provider client
+    with a 503 contract.
+-   [x] Report-only reconciliation with persisted discrepancies and a
+    counter.
+-   [ ] Handle delayed payment methods
+    (`checkout.session.async_payment_succeeded` / `_failed`).
+-   [ ] Move webhook processing to an asynchronous worker once volume
+    requires it.
+-   [ ] Add a Kafka consumer for `finflow.deposit.completed`.
+-   [ ] Provide an operator tool to resolve reconciliation discrepancies
+    (never automatic).
+-   [ ] Refunds, payouts, subscriptions, KYC and multi-currency remain out
+    of scope.
 
 ------------------------------------------------------------------------
 
