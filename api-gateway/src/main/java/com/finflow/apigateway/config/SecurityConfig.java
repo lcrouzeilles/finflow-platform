@@ -21,7 +21,7 @@ public class SecurityConfig {
                 )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health").permitAll()
-                        .requestMatchers("/transfers/**")
+                        .requestMatchers("/transfers/**", "/deposits/**")
                         .hasAnyRole("USER", "ADMIN")
                         .anyRequest().authenticated()
                 )

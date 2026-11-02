@@ -5,6 +5,9 @@ import com.finflow.transaction_service.exception.IdempotencyKeyConflictException
 import com.finflow.transaction_service.exception.InsufficientFundsException;
 import com.finflow.transaction_service.exception.InvalidTransferException;
 import com.finflow.transaction_service.exception.OwnerNotFoundException;
+import com.finflow.transaction_service.payment.service.DepositNotFoundException;
+import com.finflow.transaction_service.payment.service.InvalidDepositException;
+import com.finflow.transaction_service.payment.stripe.PaymentProviderException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -145,6 +148,47 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpServletRequest request
     ) {
         return respond(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(DepositNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleDepositNotFoundException(
+            DepositNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        return respond(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(InvalidDepositException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidDeposit(
+            InvalidDepositException exception,
+            HttpServletRequest request
+    ) {
+        return respond(HttpStatus.UNPROCESSABLE_CONTENT, exception.getMessage(), request);
+    }
+
+    /**
+     * The payment provider rejected the request (a non-retryable error such
+     * as an invalid parameter or a credential problem). The provider's
+     * message is logged, not returned.
+     */
+    @ExceptionHandler(PaymentProviderException.class)
+    public ResponseEntity<ApiErrorResponse> handlePaymentProvider(
+            PaymentProviderException exception,
+            HttpServletRequest request
+    ) {
+        log.warn(
+                "Payment provider error on {} {} (status {}): {}",
+                request.getMethod(),
+                request.getRequestURI(),
+                exception.getStatusCode(),
+                exception.getMessage()
+        );
+
+        return respond(
+                HttpStatus.BAD_GATEWAY,
+                "Payment provider rejected the request",
+                request
+        );
     }
 
     @ExceptionHandler(InsufficientFundsException.class)

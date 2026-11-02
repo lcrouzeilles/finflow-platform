@@ -29,7 +29,7 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**"
                         ).permitAll()
-                        .requestMatchers("/transfers/**")
+                        .requestMatchers("/transfers/**", "/deposits/**")
                         .hasAnyRole("USER", "ADMIN")
                         .anyRequest().authenticated()
                 )
