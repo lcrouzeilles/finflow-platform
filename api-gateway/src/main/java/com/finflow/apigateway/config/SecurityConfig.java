@@ -2,6 +2,7 @@ package com.finflow.apigateway.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -21,6 +22,9 @@ public class SecurityConfig {
                 )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health").permitAll()
+                        // Stripe webhooks carry a signature, not a JWT; the
+                        // transaction service verifies it.
+                        .requestMatchers(HttpMethod.POST, "/webhooks/stripe").permitAll()
                         .requestMatchers("/transfers/**", "/deposits/**")
                         .hasAnyRole("USER", "ADMIN")
                         .anyRequest().authenticated()

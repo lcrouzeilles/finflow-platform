@@ -1,9 +1,6 @@
 package com.finflow.transaction_service.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.finflow.transaction_service.domain.outbox.OutboxEvent;
-import com.finflow.transaction_service.event.TransferCompletedEvent;
-import com.finflow.transaction_service.event.TransferEventProducer;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
@@ -14,6 +11,9 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Polls the outbox and relays events to Kafka (at-least-once).
@@ -23,6 +23,10 @@ import java.util.List;
  * event was delivered to Kafka but its status could not be updated (for
  * example because the lease expired and another worker took it), it will
  * be re-delivered: consumers must deduplicate on {@code eventId}.
+ *
+ * <p>Each {@code event_type} is handled by one {@link OutboxEventRelay}; an
+ * event with no relay is marked failed (and eventually exhausted) rather
+ * than blocking the batch.
  */
 @Service
 @Profile("!test")
@@ -44,8 +48,7 @@ public class OutboxEventPublisher {
 
     private final OutboxEventClaimer claimer;
     private final OutboxEventStatusService statusService;
-    private final TransferEventProducer producer;
-    private final ObjectMapper objectMapper;
+    private final Map<String, OutboxEventRelay> relays;
 
     private final Counter publishedCounter;
     private final Counter failedCounter;
@@ -55,14 +58,15 @@ public class OutboxEventPublisher {
     public OutboxEventPublisher(
             OutboxEventClaimer claimer,
             OutboxEventStatusService statusService,
-            TransferEventProducer producer,
-            ObjectMapper objectMapper,
+            List<OutboxEventRelay> relays,
             MeterRegistry meterRegistry
     ) {
         this.claimer = claimer;
         this.statusService = statusService;
-        this.producer = producer;
-        this.objectMapper = objectMapper;
+        this.relays = relays.stream().collect(Collectors.toUnmodifiableMap(
+                OutboxEventRelay::eventType,
+                Function.identity()
+        ));
 
         this.publishedCounter = counter(meterRegistry, RESULT_PUBLISHED);
         this.failedCounter = counter(meterRegistry, RESULT_FAILED);
@@ -79,14 +83,19 @@ public class OutboxEventPublisher {
                 claimer.claimBatch(BATCH_SIZE, LEASE_DURATION);
 
         for (OutboxEvent event : events) {
-            try {
-                TransferCompletedEvent transferEvent =
-                        objectMapper.readValue(
-                                event.getPayload(),
-                                TransferCompletedEvent.class
-                        );
+            OutboxEventRelay relay = relays.get(event.getEventType());
 
-                producer.publishAndAwait(transferEvent);
+            if (relay == null) {
+                safeMarkFailed(
+                        event,
+                        "No relay registered for event type "
+                                + event.getEventType()
+                );
+                continue;
+            }
+
+            try {
+                relay.publishAndAwait(event.getPayload());
 
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();

@@ -8,6 +8,7 @@ import com.finflow.transaction_service.exception.OwnerNotFoundException;
 import com.finflow.transaction_service.payment.service.DepositNotFoundException;
 import com.finflow.transaction_service.payment.service.InvalidDepositException;
 import com.finflow.transaction_service.payment.stripe.PaymentProviderException;
+import com.stripe.exception.SignatureVerificationException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -189,6 +190,25 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 "Payment provider rejected the request",
                 request
         );
+    }
+
+    /**
+     * A webhook whose Stripe-Signature header is missing, malformed, stale
+     * or computed with another secret. Nothing was processed.
+     */
+    @ExceptionHandler(SignatureVerificationException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidWebhookSignature(
+            SignatureVerificationException exception,
+            HttpServletRequest request
+    ) {
+        log.warn(
+                "Rejected webhook on {} {}: {}",
+                request.getMethod(),
+                request.getRequestURI(),
+                exception.getMessage()
+        );
+
+        return respond(HttpStatus.BAD_REQUEST, "Invalid webhook signature", request);
     }
 
     @ExceptionHandler(InsufficientFundsException.class)

@@ -6,6 +6,7 @@ import com.finflow.transaction_service.event.TransferEventProducer;
 import com.finflow.transaction_service.service.OutboxEventClaimer;
 import com.finflow.transaction_service.service.OutboxEventPublisher;
 import com.finflow.transaction_service.service.OutboxEventStatusService;
+import com.finflow.transaction_service.service.TransferOutboxRelay;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,8 +51,7 @@ class OutboxEventPublisherTest {
         publisher = new OutboxEventPublisher(
                 claimer,
                 statusService,
-                producer,
-                new ObjectMapper(),
+                List.of(new TransferOutboxRelay(producer, new ObjectMapper())),
                 meterRegistry
         );
     }
@@ -271,6 +271,27 @@ class OutboxEventPublisherTest {
         publisher.publishBatch();
 
         verify(statusService).markFailed(eq(broken.getId()), eq(workerId), any(String.class));
+        verify(producer, times(1)).publishAndAwait(any(TransferCompletedEvent.class));
+        verify(statusService).markPublished(healthy.getId(), workerId);
+    }
+
+    @Test
+    void shouldMarkEventWithoutRelayAsFailedAndContinue() throws Exception {
+        String workerId = "worker-1";
+
+        OutboxEvent orphan = new OutboxEvent(
+                "SOMETHING", UUID.randomUUID(), "UNKNOWN_TYPE", "{}");
+        orphan.claim(workerId, Instant.now().plusSeconds(180));
+
+        OutboxEvent healthy = claimedEvent(workerId);
+
+        when(claimer.claimBatch(any(Integer.class), any()))
+                .thenReturn(List.of(orphan, healthy));
+
+        publisher.publishBatch();
+
+        verify(statusService).markFailed(
+                eq(orphan.getId()), eq(workerId), eq("No relay registered for event type UNKNOWN_TYPE"));
         verify(producer, times(1)).publishAndAwait(any(TransferCompletedEvent.class));
         verify(statusService).markPublished(healthy.getId(), workerId);
     }

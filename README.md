@@ -143,6 +143,27 @@ Swagger UI:
 http://localhost:8080/swagger-ui/index.html
 ```
 
+### Stripe webhooks (local smoke test)
+
+Deposits are confirmed only by Stripe webhooks, so a local run needs the
+[Stripe CLI](https://docs.stripe.com/stripe-cli) forwarding events to the
+gateway. CI never talks to Stripe; this is a manual check.
+
+```bash
+stripe login                                   # test mode account
+stripe listen --forward-to localhost:8080/webhooks/stripe
+```
+
+`stripe listen` prints the signing secret (`whsec_...`): put it in `.env` as
+`STRIPE_WEBHOOK_SECRET` together with your `sk_test_...` key, then restart the
+service. Create a deposit with `POST /deposits`, open the returned
+`checkoutUrl` and pay with the test card `4242 4242 4242 4242`; the
+`checkout.session.completed` event credits the account and
+`GET /deposits/{id}` turns `COMPLETED`. To exercise the endpoint without
+paying, `stripe trigger checkout.session.completed` sends a signed event for a
+session this service never created, which is acknowledged and recorded as an
+`UNKNOWN_SESSION` discrepancy.
+
 ## Security Model
 
 - Authentication is delegated to Keycloak. The gateway and the service both validate the JWT; realm roles become `ROLE_USER` / `ROLE_ADMIN`.

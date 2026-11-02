@@ -19,7 +19,8 @@ public class Transaction {
     @Column(name = "idempotency_key", nullable = false, length = 100, unique = true)
     private String idempotencyKey;
 
-    @Column(name = "source_account_id", nullable = false)
+    /** Null for deposits: the money comes from the payment provider. */
+    @Column(name = "source_account_id")
     private UUID sourceAccountId;
 
     @Column(name = "destination_account_id", nullable = false)
@@ -34,6 +35,10 @@ public class Transaction {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private TransactionStatus status;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private TransactionType type;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -96,6 +101,7 @@ public class Transaction {
             );
         }
 
+        this.type = TransactionType.TRANSFER;
         this.sourceAccountId = sourceAccountId;
         this.destinationAccountId = destinationAccountId;
         this.amount = amount;
@@ -103,6 +109,86 @@ public class Transaction {
         this.idempotencyKey = idempotencyKey;
         this.status = TransactionStatus.PENDING;
         this.createdAt = Instant.now();
+    }
+
+    private Transaction(
+            TransactionType type,
+            UUID destinationAccountId,
+            BigDecimal amount,
+            String currency,
+            String idempotencyKey
+    ) {
+        if (destinationAccountId == null) {
+            throw new IllegalArgumentException(
+                    "Destination account ID cannot be null"
+            );
+        }
+
+        validateAmountCurrencyAndKey(amount, currency, idempotencyKey);
+
+        this.type = type;
+        this.sourceAccountId = null;
+        this.destinationAccountId = destinationAccountId;
+        this.amount = amount;
+        this.currency = currency;
+        this.idempotencyKey = idempotencyKey;
+        this.status = TransactionStatus.PENDING;
+        this.createdAt = Instant.now();
+    }
+
+    /**
+     * Ledger entry for money entering the system from the payment provider:
+     * no source account, the destination is credited.
+     */
+    public static Transaction deposit(
+            UUID destinationAccountId,
+            BigDecimal amount,
+            String currency,
+            String idempotencyKey
+    ) {
+        return new Transaction(
+                TransactionType.DEPOSIT,
+                destinationAccountId,
+                amount,
+                currency,
+                idempotencyKey
+        );
+    }
+
+    private static void validateAmountCurrencyAndKey(
+            BigDecimal amount,
+            String currency,
+            String idempotencyKey
+    ) {
+        if (amount == null || amount.signum() <= 0) {
+            throw new IllegalArgumentException(
+                    "Transaction amount must be greater than zero"
+            );
+        }
+
+        if (currency == null || currency.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Transaction currency cannot be blank"
+            );
+        }
+
+        if (currency.length() != 3) {
+            throw new IllegalArgumentException(
+                    "Transaction currency must contain 3 characters"
+            );
+        }
+
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Idempotency key cannot be blank"
+            );
+        }
+
+        if (idempotencyKey.length() > 100) {
+            throw new IllegalArgumentException(
+                    "Idempotency key cannot exceed 100 characters"
+            );
+        }
     }
 
     public void markAsCompleted() {
