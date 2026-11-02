@@ -17,6 +17,12 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+/**
+ * The eviction must be visible as soon as the committing call returns: the
+ * listener evicts synchronously ({@code evictIfPresent}), otherwise this
+ * assertion races with an asynchronous {@code DEL} and fails intermittently
+ * (observed in CI).
+ */
 @SpringBootTest
 @ActiveProfiles("test")
 class TransferCacheListenerIntegrationTest extends AbstractIntegrationTest {

@@ -41,8 +41,8 @@ class TransferCacheListenerTest {
 
         listener.handleTransferCompleted(event);
 
-        verify(accountsCache).evict(sourceAccountId);
-        verify(accountsCache).evict(destinationAccountId);
+        verify(accountsCache).evictIfPresent(sourceAccountId);
+        verify(accountsCache).evictIfPresent(destinationAccountId);
     }
 
     @Test
