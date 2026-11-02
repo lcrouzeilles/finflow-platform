@@ -100,6 +100,7 @@ cp .env.example .env
 |---|---|
 | `DB_USERNAME`, `DB_PASSWORD` | PostgreSQL and the Transaction Service |
 | `KC_BOOTSTRAP_ADMIN_USERNAME`, `KC_BOOTSTRAP_ADMIN_PASSWORD` | Keycloak admin console |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Transaction Service (Stripe test mode: `sk_test_...` and `whsec_...`) |
 
 `keycloak/finflow-realm.json` is imported on the first start of Keycloak and contains only generic demo identities, no real users:
 
