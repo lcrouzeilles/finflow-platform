@@ -5,6 +5,7 @@ import com.stripe.exception.StripeException;
 import com.stripe.model.checkout.Session;
 import com.stripe.net.RequestOptions;
 import com.stripe.param.checkout.SessionCreateParams;
+import com.stripe.param.checkout.SessionListParams;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -17,6 +18,9 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 
 /**
  * Stripe implementation of the checkout port, on top of the official SDK,
@@ -32,7 +36,10 @@ import java.time.Instant;
  * first and the retry policy around it, so an open breaker short-circuits
  * the remaining attempts. Exhausted retries and an open breaker surface as
  * {@link PaymentProviderUnavailableException} (503); non-retryable provider
- * errors keep their {@link PaymentProviderException} (502).
+ * errors keep their {@link PaymentProviderException} (502). The customer
+ * path ({@value #CHECKOUT_POLICY}) and the reconciliation path
+ * ({@value #RECONCILIATION_POLICY}) use separate breaker instances, so a
+ * failing bulk job cannot block deposits.
  */
 @Component
 public class StripeSdkCheckoutGateway implements StripeCheckoutGateway {
@@ -43,14 +50,21 @@ public class StripeSdkCheckoutGateway implements StripeCheckoutGateway {
     static final String PRODUCT_NAME = "FinFlow deposit";
     static final String METADATA_DEPOSIT_ID = "depositId";
     static final Duration SESSION_LIFETIME = Duration.ofHours(1);
+    static final long LIST_PAGE_SIZE = 100L;
+    private static final int HTTP_NOT_FOUND = 404;
 
     /** Breaker and retry instance for session creation (customer path). */
     public static final String CHECKOUT_POLICY = "stripe-checkout";
+
+    /** Breaker and retry instance for the reconciliation job. */
+    public static final String RECONCILIATION_POLICY = "stripe-reconciliation";
 
     private final StripeClient client;
     private final StripeProperties properties;
     private final CircuitBreaker checkoutBreaker;
     private final Retry checkoutRetry;
+    private final CircuitBreaker reconciliationBreaker;
+    private final Retry reconciliationRetry;
 
     public StripeSdkCheckoutGateway(
             StripeClient client,
@@ -62,6 +76,8 @@ public class StripeSdkCheckoutGateway implements StripeCheckoutGateway {
         this.properties = properties;
         this.checkoutBreaker = circuitBreakerRegistry.circuitBreaker(CHECKOUT_POLICY);
         this.checkoutRetry = retryRegistry.retry(CHECKOUT_POLICY);
+        this.reconciliationBreaker = circuitBreakerRegistry.circuitBreaker(RECONCILIATION_POLICY);
+        this.reconciliationRetry = retryRegistry.retry(RECONCILIATION_POLICY);
     }
 
     @Override
@@ -106,6 +122,59 @@ public class StripeSdkCheckoutGateway implements StripeCheckoutGateway {
                 session.getId(),
                 session.getUrl(),
                 session.getPaymentIntent()
+        );
+    }
+
+    @Override
+    public List<ProviderCheckoutSession> listCheckoutSessions(Instant from, Instant to) {
+        SessionListParams params = SessionListParams.builder()
+                .setCreated(
+                        SessionListParams.Created.builder()
+                                .setGte(from.getEpochSecond())
+                                .setLte(to.getEpochSecond())
+                                .build()
+                )
+                .setLimit(LIST_PAGE_SIZE)
+                .build();
+
+        return resilient(reconciliationBreaker, reconciliationRetry, () -> {
+            List<ProviderCheckoutSession> sessions = new ArrayList<>();
+
+            for (Session session : client.v1().checkout().sessions().list(params).autoPagingIterable()) {
+                sessions.add(toProviderSession(session));
+            }
+
+            return sessions;
+        });
+    }
+
+    @Override
+    public Optional<ProviderCheckoutSession> findCheckoutSession(String sessionId) {
+        try {
+            Session session = resilient(
+                    reconciliationBreaker,
+                    reconciliationRetry,
+                    () -> client.v1().checkout().sessions().retrieve(sessionId)
+            );
+
+            return Optional.of(toProviderSession(session));
+        } catch (PaymentProviderException exception) {
+            if (Integer.valueOf(HTTP_NOT_FOUND).equals(exception.getStatusCode())) {
+                return Optional.empty();
+            }
+            throw exception;
+        }
+    }
+
+    static ProviderCheckoutSession toProviderSession(Session session) {
+        return new ProviderCheckoutSession(
+                session.getId(),
+                session.getPaymentIntent(),
+                session.getStatus(),
+                session.getPaymentStatus(),
+                session.getAmountTotal(),
+                session.getCurrency(),
+                session.getClientReferenceId()
         );
     }
 

@@ -4,6 +4,7 @@ import com.stripe.StripeClient;
 import com.stripe.exception.ApiConnectionException;
 import com.stripe.exception.ApiException;
 import com.stripe.exception.InvalidRequestException;
+import com.stripe.model.StripeCollection;
 import com.stripe.model.checkout.Session;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -13,7 +14,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -105,6 +109,7 @@ class StripeSdkCheckoutGatewayTest {
 
         assertThat(transport.calls.get()).isEqualTo(MAX_ATTEMPTS);
         assertThat(meterRegistry.get("resilience4j.retry.calls")
+                .tag("name", StripeSdkCheckoutGateway.CHECKOUT_POLICY)
                 .tag("kind", "failed_with_retry").functionCounter().count())
                 .isEqualTo(1.0);
     }
@@ -177,6 +182,66 @@ class StripeSdkCheckoutGatewayTest {
 
         assertThat(breaker().getState()).isEqualTo(CircuitBreaker.State.CLOSED);
         assertThat(transport.calls.get()).isEqualTo(6);
+    }
+
+    @Test
+    void shouldListSessionsCreatedInTheWindow() {
+        Session paid = new Session();
+        paid.setId("cs_test_list_1");
+        paid.setStatus("complete");
+        paid.setPaymentStatus("paid");
+        paid.setAmountTotal(2500L);
+        paid.setCurrency("usd");
+        paid.setClientReferenceId("deposit-1");
+        paid.setPaymentIntent("pi_list_1");
+
+        StripeCollection<Session> page = new StripeCollection<>();
+        page.setData(List.of(paid));
+        page.setHasMore(false);
+        page.setUrl("/v1/checkout/sessions");
+        page.setResponseGetter(transport);
+        transport.respondWith(page);
+
+        Instant from = Instant.parse("2026-11-01T00:00:00Z");
+        Instant to = Instant.parse("2026-11-02T00:00:00Z");
+
+        List<ProviderCheckoutSession> sessions = gateway.listCheckoutSessions(from, to);
+
+        assertThat(sessions).hasSize(1);
+        assertThat(sessions.get(0).sessionId()).isEqualTo("cs_test_list_1");
+        assertThat(sessions.get(0).isPaid()).isTrue();
+        assertThat(sessions.get(0).amountTotal()).isEqualTo(2500L);
+        assertThat(sessions.get(0).clientReferenceId()).isEqualTo("deposit-1");
+
+        Map<String, Object> params = transport.params.get(0);
+        assertThat(params.get("limit")).isEqualTo(100L);
+        assertThat(params.get("created"))
+                .isEqualTo(Map.of("gte", from.getEpochSecond(), "lte", to.getEpochSecond()));
+    }
+
+    @Test
+    void shouldReturnEmptyForUnknownSession() {
+        transport.failWith(() -> new InvalidRequestException(
+                "No such checkout.session", "id", "req_4", "resource_missing", 404, null));
+
+        Optional<ProviderCheckoutSession> session = gateway.findCheckoutSession("cs_missing");
+
+        assertThat(session).isEmpty();
+        assertThat(transport.calls.get()).isEqualTo(1);
+    }
+
+    @Test
+    void shouldUseASeparateBreakerForReconciliation() {
+        transport.failWith(() -> new ApiConnectionException("down"));
+
+        for (int i = 0; i < 2; i++) {
+            assertThatThrownBy(() -> gateway.findCheckoutSession("cs_any"))
+                    .isInstanceOf(PaymentProviderUnavailableException.class);
+        }
+
+        assertThat(circuitBreakers.circuitBreaker(StripeSdkCheckoutGateway.RECONCILIATION_POLICY).getState())
+                .isEqualTo(CircuitBreaker.State.OPEN);
+        assertThat(breaker().getState()).isEqualTo(CircuitBreaker.State.CLOSED);
     }
 
     private CircuitBreaker breaker() {
