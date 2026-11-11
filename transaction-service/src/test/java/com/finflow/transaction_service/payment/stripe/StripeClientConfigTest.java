@@ -56,6 +56,22 @@ class StripeClientConfigTest {
     }
 
     @Test
+    void shouldUseTheRealStripeApiUnlessOverridden() {
+        contextRunner.run(context ->
+                assertThat(context.getBean(StripeProperties.class).hasApiBaseOverride())
+                        .isFalse());
+
+        contextRunner
+                .withPropertyValues("finflow.payments.stripe.api-base=http://fake-stripe:8080")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(StripeClient.class);
+                    StripeProperties properties = context.getBean(StripeProperties.class);
+                    assertThat(properties.hasApiBaseOverride()).isTrue();
+                    assertThat(properties.apiBase()).isEqualTo("http://fake-stripe:8080");
+                });
+    }
+
+    @Test
     void shouldRejectMissingRedirectUrls() {
         new ApplicationContextRunner()
                 .withUserConfiguration(StripeClientConfig.class)

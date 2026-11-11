@@ -56,7 +56,8 @@ class StripeSdkCheckoutGatewayTest {
                         50f,
                         Duration.ofMinutes(5),
                         1
-                )
+                ),
+                null
         );
 
         StripeResilienceConfig config = new StripeResilienceConfig();

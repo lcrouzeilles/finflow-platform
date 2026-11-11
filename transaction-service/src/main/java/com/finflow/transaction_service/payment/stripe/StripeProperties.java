@@ -28,11 +28,20 @@ public record StripeProperties(
         @NotBlank String cancelUrl,
         @NotNull Duration connectTimeout,
         @NotNull Duration readTimeout,
-        @DefaultValue @Valid Resilience resilience
+        @DefaultValue @Valid Resilience resilience,
+        String apiBase
 ) {
 
     public boolean isConfigured() {
         return secretKey != null && !secretKey.isBlank();
+    }
+
+    /**
+     * True when {@code apiBase} points the client somewhere other than
+     * Stripe, e.g. the simulated Stripe used by the load tests in perf/.
+     */
+    public boolean hasApiBaseOverride() {
+        return apiBase != null && !apiBase.isBlank();
     }
 
     public boolean isWebhookConfigured() {

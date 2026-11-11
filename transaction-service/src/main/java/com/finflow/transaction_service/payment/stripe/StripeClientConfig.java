@@ -44,11 +44,21 @@ public class StripeClientConfig {
 
         String apiKey = properties.isConfigured() ? properties.secretKey() : "";
 
-        return StripeClient.builder()
+        StripeClient.StripeClientBuilder builder = StripeClient.builder()
                 .setApiKey(apiKey)
                 .setConnectTimeout((int) properties.connectTimeout().toMillis())
                 .setReadTimeout((int) properties.readTimeout().toMillis())
-                .setMaxNetworkRetries(SDK_NETWORK_RETRIES)
-                .build();
+                .setMaxNetworkRetries(SDK_NETWORK_RETRIES);
+
+        if (properties.hasApiBaseOverride()) {
+            log.warn(
+                    "Stripe API base overridden to {}; this is for local "
+                            + "load testing only, no request reaches Stripe",
+                    properties.apiBase()
+            );
+            builder.setApiBase(properties.apiBase());
+        }
+
+        return builder.build();
     }
 }
