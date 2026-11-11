@@ -21,7 +21,8 @@ public class SecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/health").permitAll()
+                        // Liveness and readiness probes come without a token.
+                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         // Stripe webhooks carry a signature, not a JWT; the
                         // transaction service verifies it.
                         .requestMatchers(HttpMethod.POST, "/webhooks/stripe").permitAll()
