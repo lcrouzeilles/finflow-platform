@@ -1,6 +1,6 @@
 package com.finflow.transaction_service.domain.outbox;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.finflow.transaction_service.event.TransferCompletedEvent;
 import com.finflow.transaction_service.event.TransferEventProducer;
 import com.finflow.transaction_service.service.OutboxEventClaimer;

@@ -1,6 +1,6 @@
 package com.finflow.transaction_service.payment.webhook;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 
 /**
  * The fields of a Checkout Session the webhook handler needs, read from the
@@ -48,7 +48,7 @@ public record CheckoutSessionPayload(
 
     private static String text(JsonNode node, String field) {
         JsonNode value = node.path(field);
-        return value.isTextual() ? value.asText() : null;
+        return value.isString() ? value.asString() : null;
     }
 
     private static Long number(JsonNode node, String field) {
@@ -58,8 +58,8 @@ public record CheckoutSessionPayload(
 
     /** Expandable reference: either the id string or an object with an id. */
     private static String idOf(JsonNode node) {
-        if (node.isTextual()) {
-            return node.asText();
+        if (node.isString()) {
+            return node.asString();
         }
         if (node.isObject()) {
             return text(node, "id");

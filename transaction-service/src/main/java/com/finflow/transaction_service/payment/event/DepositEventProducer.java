@@ -1,6 +1,6 @@
 package com.finflow.transaction_service.payment.event;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.finflow.transaction_service.service.OutboxEventRelay;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;

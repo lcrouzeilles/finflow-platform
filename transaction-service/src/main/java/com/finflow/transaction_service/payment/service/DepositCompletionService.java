@@ -1,7 +1,7 @@
 package com.finflow.transaction_service.payment.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import com.finflow.transaction_service.domain.account.Account;
 import com.finflow.transaction_service.domain.outbox.OutboxEvent;
 import com.finflow.transaction_service.domain.transaction.Transaction;
@@ -246,7 +246,7 @@ public class DepositCompletionService {
     private String serialize(DepositCompletedEvent event) {
         try {
             return objectMapper.writeValueAsString(event);
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
             throw new IllegalStateException(
                     "Failed to serialize deposit completed event", exception
             );
