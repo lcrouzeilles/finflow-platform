@@ -2,6 +2,7 @@ package com.finflow.transaction_service.service;
 
 import com.finflow.transaction_service.cache.RedisAvailability;
 import com.finflow.transaction_service.domain.account.Account;
+import com.finflow.transaction_service.domain.account.AccountNumber;
 import com.finflow.transaction_service.domain.account.AccountNumberGenerator;
 import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.OwnerNotFoundException;
@@ -15,6 +16,8 @@ import java.util.UUID;
 
 @Service
 public class AccountService {
+
+    private static final int MAX_ACCOUNT_NUMBER_ATTEMPTS = 5;
 
     private final AccountRepository accountRepository;
     private final AccountNumberGenerator accountNumberGenerator;
@@ -42,11 +45,32 @@ public class AccountService {
             throw new OwnerNotFoundException(ownerId);
         }
         Account newAccount = new Account(
-                accountNumberGenerator.generate(),
+                generateUnusedAccountNumber(),
                 currency,
                 ownerId
         );
         return accountRepository.save(newAccount);
+    }
+
+    /**
+     * Collisions are unlikely (36^8 combinations) but would otherwise fail
+     * on the unique constraint. Checking before insert keeps the retry inside
+     * one transaction; a concurrent insert of the same number still hits the
+     * constraint and is reported as a conflict by the error handler.
+     */
+    private AccountNumber generateUnusedAccountNumber() {
+        for (int attempt = 0; attempt < MAX_ACCOUNT_NUMBER_ATTEMPTS; attempt++) {
+            AccountNumber candidate = accountNumberGenerator.generate();
+
+            if (!accountRepository.existsByAccountNumber(candidate)) {
+                return candidate;
+            }
+        }
+
+        throw new IllegalStateException(
+                "Could not generate an unused account number after "
+                        + MAX_ACCOUNT_NUMBER_ATTEMPTS + " attempts"
+        );
     }
 
     /**

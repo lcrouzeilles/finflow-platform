@@ -16,7 +16,7 @@ public class AccountNumberGenerator {
     public AccountNumber generate() {
         StringBuilder tail = new StringBuilder();
 
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < RANDOM_LENGTH; i++) {
             int index = random.nextInt(CHARACTERS.length());
             tail.append(CHARACTERS.charAt(index));
         }
