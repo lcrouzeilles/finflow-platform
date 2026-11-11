@@ -89,7 +89,7 @@ The project uses a single Git repository with independently deployable Spring Bo
 
 | Service | Host Port | Container Port |
 |---|---:|---:|
-| API Gateway | `8080` | `8080` |
+| API Gateway | `${GATEWAY_PORT}` (default `8080`) | `8080` |
 | Keycloak | `8081` | `8080` |
 | PostgreSQL | `55433` | `5432` |
 | Redis | `6379` | `6379` |
@@ -115,6 +115,7 @@ cp .env.example .env
 | `DB_USERNAME`, `DB_PASSWORD` | PostgreSQL and the Transaction Service |
 | `KC_BOOTSTRAP_ADMIN_USERNAME`, `KC_BOOTSTRAP_ADMIN_PASSWORD` | Keycloak admin console |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Transaction Service (Stripe test mode: `sk_test_...` and `whsec_...`) |
+| `GATEWAY_PORT` | Host port of the API Gateway (default `8080`); change it if that port is taken. Stripe Checkout redirects follow it |
 
 `keycloak/finflow-realm.json` is imported on the first start of Keycloak and contains only generic demo identities, no real users:
 
@@ -139,7 +140,7 @@ Check the services:
 docker compose ps
 ```
 
-API Gateway:
+API Gateway (replace `8080` with `GATEWAY_PORT` if you changed it):
 
 ```text
 http://localhost:8080
@@ -165,7 +166,7 @@ gateway. CI never talks to Stripe; this is a manual check.
 
 ```bash
 stripe login                                   # test mode account
-stripe listen --forward-to localhost:8080/webhooks/stripe
+stripe listen --forward-to localhost:8080/webhooks/stripe   # or your GATEWAY_PORT
 ```
 
 `stripe listen` prints the signing secret (`whsec_...`): put it in `.env` as
