@@ -2,16 +2,23 @@ FROM maven:3.9.13-eclipse-temurin-21 AS builder
 
 WORKDIR /app
 
+# Resolve dependencies in their own layer so source-only changes reuse it.
 COPY pom.xml .
+RUN mvn -B dependency:go-offline
+
 COPY src ./src
 
-RUN mvn clean package -DskipTests
+RUN mvn -B package -DskipTests
 
 FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 
-COPY --from=builder /app/target/api-gateway-0.0.1-SNAPSHOT.jar app.jar
+RUN groupadd --system app && useradd --system --gid app --no-create-home app
+
+COPY --from=builder --chown=app:app /app/target/api-gateway-0.0.1-SNAPSHOT.jar app.jar
+
+USER app
 
 EXPOSE 8080
 
