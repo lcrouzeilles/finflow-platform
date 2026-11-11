@@ -8,6 +8,8 @@ import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.OwnerNotFoundException;
 import com.finflow.transaction_service.repository.AccountRepository;
 import com.finflow.transaction_service.repository.OwnerRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
@@ -16,6 +18,9 @@ import java.util.UUID;
 
 @Service
 public class AccountService {
+
+    private static final Logger log =
+            LoggerFactory.getLogger(AccountService.class);
 
     private static final int MAX_ACCOUNT_NUMBER_ATTEMPTS = 5;
 
@@ -49,7 +54,16 @@ public class AccountService {
                 currency,
                 ownerId
         );
-        return accountRepository.save(newAccount);
+        Account saved = accountRepository.save(newAccount);
+
+        log.info(
+                "Account created: accountId={}, ownerId={}, currency={}",
+                saved.getId(),
+                ownerId,
+                currency
+        );
+
+        return saved;
     }
 
     /**

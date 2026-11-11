@@ -13,6 +13,8 @@ import com.finflow.transaction_service.exception.InvalidTransferException;
 import com.finflow.transaction_service.repository.AccountRepository;
 import com.finflow.transaction_service.repository.OutboxEventRepository;
 import com.finflow.transaction_service.repository.TransactionRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.access.AccessDeniedException;
@@ -25,6 +27,9 @@ import java.util.UUID;
 
 @Service
 public class TransferService {
+
+    private static final Logger log =
+            LoggerFactory.getLogger(TransferService.class);
 
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
@@ -156,6 +161,16 @@ public class TransferService {
         // Kafka delivery goes through the outbox. The in-process event is
         // still needed for the AFTER_COMMIT cache eviction listener.
         eventPublisher.publishEvent(event);
+
+        log.info(
+                "Transfer recorded: transactionId={}, sourceAccountId={}, "
+                        + "destinationAccountId={}, amount={} {}",
+                savedTransaction.getId(),
+                request.sourceAccountId(),
+                request.destinationAccountId(),
+                request.amount(),
+                savedTransaction.getCurrency()
+        );
 
         return savedTransaction;
     }

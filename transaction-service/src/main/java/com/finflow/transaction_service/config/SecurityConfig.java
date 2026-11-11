@@ -30,6 +30,9 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**"
                         ).permitAll()
+                        // Scraped from the internal network only; the gateway
+                        // does not route /actuator/**.
+                        .requestMatchers(HttpMethod.GET, "/actuator/prometheus").permitAll()
                         // Authenticated by the Stripe-Signature header, not by a JWT.
                         .requestMatchers(HttpMethod.POST, "/webhooks/stripe").permitAll()
                         .requestMatchers("/transfers/**", "/deposits/**")

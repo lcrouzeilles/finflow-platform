@@ -217,6 +217,24 @@ Amounts accept at most 15 integer digits and 2 decimals.
 - Delivery is **at least once**: an event delivered to Kafka whose status update fails is delivered again. Consumers must deduplicate on `eventId`; the payload also carries `transactionId` for correlation.
 - Metrics: the counter `finflow.outbox.events` is tagged with `result=published|failed|exhausted|status_update_failed`.
 
+## Observability
+
+**Correlation id.** Every request gets an `X-Correlation-Id`. The gateway keeps a well-formed incoming value (up to 64 characters from `[A-Za-z0-9-]`) or generates a UUID, forwards it to the transaction service and returns it in the response. The id follows a transfer end to end:
+
+```text
+gateway → transaction service (MDC) → outbox_events.correlation_id → Kafka header X-Correlation-Id → consumer (MDC)
+```
+
+Webhooks and requests rejected by security get an id as well. Events created outside a request (for example by the reconciliation job) have none.
+
+**Logs.** Every log line includes the id: as a `[correlation-id]` prefix when running locally, and as the `correlationId` field in the JSON (ECS) logs the `docker` profile writes. Transfers, account creation, deposits and outbox failures are logged at `INFO`/`WARN`, with ids rather than personal data.
+
+**Metrics.** `/actuator/prometheus` exposes the Micrometer registry in Prometheus format: the outbox counters, the Stripe circuit breaker and retry metrics (`resilience4j_*`), the reconciliation discrepancy counter, plus JVM, HTTP and connection-pool metrics. It needs no token so a scraper can reach it, which is safe here because the gateway does not route `/actuator/**` and Docker Compose does not publish the transaction service's port. `/actuator/metrics` still requires a JWT.
+
+```bash
+docker compose exec transaction-service curl -s localhost:8080/actuator/prometheus | grep finflow_outbox
+```
+
 ## Payments
 
 Deposits are funded with Stripe Checkout in test mode. The flow has three legs, and only the second one moves money in the ledger:
@@ -307,10 +325,11 @@ git archive --format=zip --output finflow-$(git rev-parse --short HEAD).zip HEAD
 - [x] Account-level authorization (Keycloak identity → owner)
 - [x] Testcontainers-based integration tests
 - [x] Stripe deposits: Checkout, exactly-once webhooks, resilience, reconciliation
+- [x] Observability: correlation ids end to end, structured logs, Prometheus metrics
 
 ### Next
 - [ ] Kubernetes
-- [ ] Observability
+- [ ] Distributed tracing and alerting
 - [ ] Cloud deployment
 - [ ] Performance and resilience testing
 
@@ -396,11 +415,12 @@ roadmap unless required by a new feature or a correctness issue.
 
 ### 7. Observability and Operations
 
--   [ ] Add structured logging with transaction IDs, event IDs, and
+-   [x] Add structured logging with transaction IDs, event IDs, and
     correlation IDs.
 -   [ ] Introduce metrics for transfer processing, outbox publication,
-    retry activity, and consumer failures. *(Partial: outbox publication
-    counters only.)*
+    retry activity, and consumer failures. *(Partial: outbox publication,
+    Stripe retry/circuit breaker and reconciliation counters, exported to
+    Prometheus; no transfer or consumer-specific metrics yet.)*
 -   [ ] Add distributed tracing across the API gateway, transaction
     service, and asynchronous workflows.
 -   [ ] Define alerts for stuck outbox events and repeated publication
