@@ -2,6 +2,8 @@
 package com.finflow.transaction_service.domain.outbox;
 
 import com.finflow.transaction_service.config.CorrelationIdFilter;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanContext;
 import jakarta.persistence.*;
 import lombok.Getter;
 import org.slf4j.MDC;
@@ -64,6 +66,10 @@ public class OutboxEvent {
     @Column(name = "correlation_id", length = 64)
     private String correlationId;
 
+    /** W3C traceparent of the originating request, if it was traced. */
+    @Column(name = "trace_parent", length = 55)
+    private String traceParent;
+
     protected OutboxEvent() {
         // Required by JPA
     }
@@ -99,6 +105,21 @@ public class OutboxEvent {
         this.createdAt = Instant.now();
         this.attempts = 0;
         this.correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
+        this.traceParent = currentTraceParent();
+    }
+
+    /**
+     * The current span as a W3C traceparent ({@code 00-traceId-spanId-flags}),
+     * or {@code null} outside a span. Micrometer's OpenTelemetry bridge keeps
+     * the current span in the OpenTelemetry context, so it is visible here.
+     */
+    private static String currentTraceParent() {
+        SpanContext span = Span.current().getSpanContext();
+        if (!span.isValid()) {
+            return null;
+        }
+        return "00-" + span.getTraceId() + "-" + span.getSpanId()
+                + "-" + span.getTraceFlags().asHex();
     }
 
     public void markPublished() {

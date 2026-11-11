@@ -1,6 +1,11 @@
 package com.finflow.transaction_service.domain.outbox;
 
 import com.finflow.transaction_service.config.CorrelationIdFilter;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanContext;
+import io.opentelemetry.api.trace.TraceFlags;
+import io.opentelemetry.api.trace.TraceState;
+import io.opentelemetry.context.Scope;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 
@@ -41,6 +46,25 @@ class OutboxEventTest {
     @Test
     void shouldHaveNoCorrelationIdOutsideARequest() {
         assertThat(createEvent().getCorrelationId()).isNull();
+    }
+
+    @Test
+    void shouldCaptureTheTraceParentOfTheCurrentSpan() {
+        SpanContext span = SpanContext.create(
+                "4bf92f3577b34da6a3ce929d0e0e4736",
+                "00f067aa0ba902b7",
+                TraceFlags.getSampled(),
+                TraceState.getDefault()
+        );
+        try (Scope ignored = Span.wrap(span).makeCurrent()) {
+            assertThat(createEvent().getTraceParent())
+                    .isEqualTo("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+        }
+    }
+
+    @Test
+    void shouldHaveNoTraceParentOutsideASpan() {
+        assertThat(createEvent().getTraceParent()).isNull();
     }
 
     @Test

@@ -9,6 +9,7 @@ import com.finflow.transaction_service.service.OutboxEventPublisher;
 import com.finflow.transaction_service.service.OutboxEventStatusService;
 import com.finflow.transaction_service.service.TransferOutboxRelay;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -54,7 +55,8 @@ class OutboxEventPublisherTest {
                 claimer,
                 statusService,
                 List.of(new TransferOutboxRelay(producer, new ObjectMapper())),
-                meterRegistry
+                meterRegistry,
+                ObservationRegistry.NOOP
         );
     }
 

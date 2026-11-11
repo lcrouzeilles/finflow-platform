@@ -4,6 +4,9 @@ import com.finflow.transaction_service.config.CorrelationIdFilter;
 import com.finflow.transaction_service.domain.outbox.OutboxEvent;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
+import io.micrometer.observation.transport.ReceiverContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -42,6 +45,8 @@ public class OutboxEventPublisher {
     static final String RESULT_FAILED = "failed";
     static final String RESULT_EXHAUSTED = "exhausted";
     static final String RESULT_STATUS_UPDATE_FAILED = "status_update_failed";
+    static final String OBSERVATION_PUBLISH = "finflow.outbox.publish";
+    private static final String TRACE_PARENT = "traceparent";
 
     private static final int BATCH_SIZE = 10;
     private static final Duration LEASE_DURATION =
@@ -51,6 +56,7 @@ public class OutboxEventPublisher {
     private final OutboxEventClaimer claimer;
     private final OutboxEventStatusService statusService;
     private final Map<String, OutboxEventRelay> relays;
+    private final ObservationRegistry observationRegistry;
 
     private final Counter publishedCounter;
     private final Counter failedCounter;
@@ -61,7 +67,8 @@ public class OutboxEventPublisher {
             OutboxEventClaimer claimer,
             OutboxEventStatusService statusService,
             List<OutboxEventRelay> relays,
-            MeterRegistry meterRegistry
+            MeterRegistry meterRegistry,
+            ObservationRegistry observationRegistry
     ) {
         this.claimer = claimer;
         this.statusService = statusService;
@@ -69,6 +76,7 @@ public class OutboxEventPublisher {
                 OutboxEventRelay::eventType,
                 Function.identity()
         ));
+        this.observationRegistry = observationRegistry;
 
         this.publishedCounter = counter(meterRegistry, RESULT_PUBLISHED);
         this.failedCounter = counter(meterRegistry, RESULT_FAILED);
@@ -113,7 +121,9 @@ public class OutboxEventPublisher {
         }
 
         try {
-            relay.publishAndAwait(event.getPayload(), event.getCorrelationId());
+            publishObservation(event).observeChecked(
+                    () -> relay.publishAndAwait(event.getPayload(), event.getCorrelationId())
+            );
 
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
@@ -127,6 +137,24 @@ public class OutboxEventPublisher {
 
         safeMarkPublished(event);
         return true;
+    }
+
+    /**
+     * The publication of one event, traced as a child of the request that
+     * wrote it (the stored traceparent is read like an incoming message
+     * header). The Kafka send happens inside it, so a single trace runs from
+     * the HTTP request to the Kafka listener. Without a stored traceparent
+     * the publication starts a new trace.
+     */
+    private Observation publishObservation(OutboxEvent event) {
+        ReceiverContext<OutboxEvent> context = new ReceiverContext<>(
+                (carrier, key) -> TRACE_PARENT.equals(key) ? carrier.getTraceParent() : null
+        );
+        context.setCarrier(event);
+
+        return Observation.createNotStarted(OBSERVATION_PUBLISH, () -> context, observationRegistry)
+                .contextualName("outbox publish")
+                .lowCardinalityKeyValue("event.type", event.getEventType());
     }
 
     private void safeMarkPublished(OutboxEvent event) {
