@@ -1,0 +1,24 @@
+# The local overlay with Stripe replaced by WireMock, for the k6 scenarios
+# in perf/ (k8s equivalent of perf/docker-compose.perf.yml). Deploy with
+#
+#   OVERLAY=perf k8s/deploy.sh
+#
+# which also loads the throwaway Stripe credentials into finflow-secrets
+# and the WireMock mappings into a ConfigMap. Deploy the local overlay
+# again to go back to the normal setup.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: finflow
+
+resources:
+  - ../local
+  - fake-stripe.yaml
+
+configMapGenerator:
+  - name: finflow-config
+    behavior: merge
+    literals:
+      - STRIPE_API_BASE=http://fake-stripe:8080
+      # Shorter open state so the outage scenario sees the breaker recover.
+      - FINFLOW_PAYMENTS_STRIPE_RESILIENCE_WAIT_IN_OPEN=10s

@@ -4,6 +4,7 @@
 #
 #   k8s/deploy.sh               build the images and apply everything
 #   SKIP_BUILD=1 k8s/deploy.sh  reuse the images already built
+#   OVERLAY=perf k8s/deploy.sh  Stripe replaced by WireMock, for perf/run.sh (TARGET=k8s)
 #
 # Remove everything with: kubectl --context docker-desktop delete namespace finflow
 #
@@ -19,6 +20,8 @@ cd "$root"
 
 context="${KUBE_CONTEXT:-docker-desktop}"
 namespace=finflow
+overlay="${OVERLAY:-local}"
+case "$overlay" in local|perf) ;; *) echo "OVERLAY must be local or perf" >&2; exit 2;; esac
 
 k() { kubectl --context "$context" "$@"; }
 # kubectl on Windows needs native paths.
@@ -51,7 +54,16 @@ trap 'rm -f "$secret_file"' EXIT
 chmod 600 "$secret_file"
 for key in DB_USERNAME DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD \
            STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET; do
-  printf '%s=%s\n' "$key" "$(env_value "$key")" >> "$secret_file"
+  value="$(env_value "$key")"
+  # Throwaway credentials that only work against fake-stripe, as in
+  # perf/docker-compose.perf.yml.
+  if [ "$overlay" = perf ]; then
+    case "$key" in
+      STRIPE_SECRET_KEY) value=sk_test_perf_only ;;
+      STRIPE_WEBHOOK_SECRET) value=whsec_perf_only ;;
+    esac
+  fi
+  printf '%s=%s\n' "$key" "$value" >> "$secret_file"
 done
 k -n "$namespace" create secret generic finflow-secrets \
   --from-env-file="$(native_path "$secret_file")" --dry-run=client -o yaml | k apply -f -
@@ -67,12 +79,19 @@ configmap grafana-datasources --from-file=observability/grafana/provisioning/dat
 configmap grafana-dashboards \
   --from-file=observability/grafana/provisioning/dashboards/dashboards.yaml \
   --from-file=observability/grafana/provisioning/dashboards/finflow.json
+if [ "$overlay" = perf ]; then
+  configmap fake-stripe-mappings --from-file=perf/wiremock/mappings
+else
+  # Back from the perf overlay: apply does not prune what it no longer lists.
+  k -n "$namespace" delete deployment/fake-stripe service/fake-stripe service/fake-stripe-external \
+    configmap/fake-stripe-mappings --ignore-not-found
+fi
 
 # The image tag does not change between builds, so running application
 # pods are restarted to pull the images just built.
 redeploy=0
 k -n "$namespace" get deployment transaction-service >/dev/null 2>&1 && redeploy=1
-k apply -k k8s/overlays/local
+k apply -k "k8s/overlays/$overlay"
 if [ "$redeploy" = 1 ]; then
   k -n "$namespace" rollout restart deployment/transaction-service deployment/api-gateway
 fi
@@ -82,10 +101,13 @@ for workload in statefulset/postgres statefulset/kafka deployment/redis deployme
                 deployment/transaction-service deployment/api-gateway; do
   k -n "$namespace" rollout status "$workload" --timeout=5m
 done
+if [ "$overlay" = perf ]; then
+  k -n "$namespace" rollout status deployment/fake-stripe --timeout=5m
+fi
 
 cat <<EOF
 
-FinFlow is running in namespace $namespace:
+FinFlow is running in namespace $namespace (overlay $overlay):
   API gateway  http://localhost:8180
   Keycloak     http://localhost:8181  (tokens for the gateway come from here)
   Grafana      kubectl --context $context -n $namespace port-forward svc/grafana 3000:3000

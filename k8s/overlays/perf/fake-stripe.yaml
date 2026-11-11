@@ -1,0 +1,67 @@
+# WireMock standing in for the Stripe API, with the mappings from
+# perf/wiremock/mappings (ConfigMap created by k8s/deploy.sh). Published on
+# localhost:8182 so the stripe-outage scenario can inject failures through
+# WireMock's admin API.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-stripe
+  labels:
+    app.kubernetes.io/name: fake-stripe
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fake-stripe
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fake-stripe
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: wiremock
+          image: wiremock/wiremock:3.13.1
+          args: [ "--global-response-templating", "--disable-banner" ]
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /__admin/health, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - name: mappings
+              mountPath: /home/wiremock/mappings
+              readOnly: true
+      volumes:
+        - name: mappings
+          configMap:
+            name: fake-stripe-mappings
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fake-stripe
+spec:
+  selector:
+    app.kubernetes.io/name: fake-stripe
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fake-stripe-external
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: fake-stripe
+  ports:
+    - name: http
+      port: 8182
+      targetPort: http
