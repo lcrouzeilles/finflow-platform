@@ -1,5 +1,6 @@
 package com.finflow.transaction_service.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
@@ -19,11 +20,12 @@ public class CacheConfig {
 
     @Bean
     public CacheManager cacheManager(
-            RedisConnectionFactory redisConnectionFactory
+            RedisConnectionFactory redisConnectionFactory,
+            @Value("${spring.cache.redis.time-to-live:5m}") Duration timeToLive
     ) {
         RedisCacheConfiguration configuration =
                 RedisCacheConfiguration.defaultCacheConfig()
-                        .entryTtl(Duration.ofMinutes(5))
+                        .entryTtl(timeToLive)
                         .serializeKeysWith(
                                 RedisSerializationContext.SerializationPair
                                         .fromSerializer(new StringRedisSerializer())
