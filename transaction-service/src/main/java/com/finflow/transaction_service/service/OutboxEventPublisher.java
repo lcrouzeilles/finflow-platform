@@ -48,7 +48,8 @@ public class OutboxEventPublisher {
     static final String OBSERVATION_PUBLISH = "finflow.outbox.publish";
     private static final String TRACE_PARENT = "traceparent";
 
-    private static final int BATCH_SIZE = 10;
+    static final int BATCH_SIZE = 10;
+    static final int MAX_BATCHES_PER_RUN = 50;
     private static final Duration LEASE_DURATION =
             Duration.ofMinutes(3);
     private static final int MAX_ERROR_LENGTH = 4000;
@@ -89,6 +90,24 @@ public class OutboxEventPublisher {
             fixedDelayString = "${finflow.outbox.poll-interval-ms:1000}"
     )
     public void publishBatch() {
+        // Keep draining while batches come back full: one batch per poll
+        // caps throughput at BATCH_SIZE events per interval and instance,
+        // far below the rate transfers can produce them. The bound keeps a
+        // single run from holding the scheduler thread indefinitely.
+        for (int batch = 0; batch < MAX_BATCHES_PER_RUN; batch++) {
+            if (claimAndPublish() < BATCH_SIZE) {
+                return;
+            }
+        }
+    }
+
+    /**
+     * Claims and publishes one batch.
+     *
+     * @return the number of events claimed, or {@code -1} if the publisher
+     *         was interrupted
+     */
+    private int claimAndPublish() {
         List<OutboxEvent> events =
                 claimer.claimBatch(BATCH_SIZE, LEASE_DURATION);
 
@@ -99,12 +118,13 @@ public class OutboxEventPublisher {
             }
             try {
                 if (!publish(event)) {
-                    return;
+                    return -1;
                 }
             } finally {
                 MDC.remove(CorrelationIdFilter.MDC_KEY);
             }
         }
+        return events.size();
     }
 
     /** Returns {@code false} when the batch must stop (interrupted). */
