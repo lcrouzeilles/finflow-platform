@@ -1,10 +1,12 @@
 package com.finflow.transaction_service.service;
 
+import com.finflow.transaction_service.config.CorrelationIdFilter;
 import com.finflow.transaction_service.domain.outbox.OutboxEvent;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -83,32 +85,48 @@ public class OutboxEventPublisher {
                 claimer.claimBatch(BATCH_SIZE, LEASE_DURATION);
 
         for (OutboxEvent event : events) {
-            OutboxEventRelay relay = relays.get(event.getEventType());
-
-            if (relay == null) {
-                safeMarkFailed(
-                        event,
-                        "No relay registered for event type "
-                                + event.getEventType()
-                );
-                continue;
+            // Log lines about this event carry the originating request's id.
+            if (event.getCorrelationId() != null) {
+                MDC.put(CorrelationIdFilter.MDC_KEY, event.getCorrelationId());
             }
-
             try {
-                relay.publishAndAwait(event.getPayload());
-
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                safeMarkFailed(event, "Publisher interrupted");
-                return;
-
-            } catch (Exception exception) {
-                safeMarkFailed(event, errorMessage(exception));
-                continue;
+                if (!publish(event)) {
+                    return;
+                }
+            } finally {
+                MDC.remove(CorrelationIdFilter.MDC_KEY);
             }
-
-            safeMarkPublished(event);
         }
+    }
+
+    /** Returns {@code false} when the batch must stop (interrupted). */
+    private boolean publish(OutboxEvent event) {
+        OutboxEventRelay relay = relays.get(event.getEventType());
+
+        if (relay == null) {
+            safeMarkFailed(
+                    event,
+                    "No relay registered for event type "
+                            + event.getEventType()
+            );
+            return true;
+        }
+
+        try {
+            relay.publishAndAwait(event.getPayload(), event.getCorrelationId());
+
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            safeMarkFailed(event, "Publisher interrupted");
+            return false;
+
+        } catch (Exception exception) {
+            safeMarkFailed(event, errorMessage(exception));
+            return true;
+        }
+
+        safeMarkPublished(event);
+        return true;
     }
 
     private void safeMarkPublished(OutboxEvent event) {

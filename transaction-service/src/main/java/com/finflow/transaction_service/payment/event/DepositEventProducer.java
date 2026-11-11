@@ -1,10 +1,13 @@
 package com.finflow.transaction_service.payment.event;
 
 import tools.jackson.databind.ObjectMapper;
+import com.finflow.transaction_service.config.CorrelationIdFilter;
 import com.finflow.transaction_service.service.OutboxEventRelay;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -36,14 +39,22 @@ public class DepositEventProducer implements OutboxEventRelay {
     }
 
     @Override
-    public void publishAndAwait(String payload) throws Exception {
+    public void publishAndAwait(String payload, String correlationId) throws Exception {
         DepositCompletedEvent event =
                 objectMapper.readValue(payload, DepositCompletedEvent.class);
 
-        kafkaTemplate.send(
+        ProducerRecord<String, DepositCompletedEvent> record = new ProducerRecord<>(
                 TOPIC,
                 event.accountId().toString(),
                 event
-        ).get(ACK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        );
+        if (correlationId != null) {
+            record.headers().add(
+                    CorrelationIdFilter.HEADER,
+                    correlationId.getBytes(StandardCharsets.UTF_8)
+            );
+        }
+
+        kafkaTemplate.send(record).get(ACK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 }

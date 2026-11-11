@@ -1,6 +1,7 @@
 package com.finflow.transaction_service.domain.outbox;
 
 import tools.jackson.databind.ObjectMapper;
+import com.finflow.transaction_service.config.CorrelationIdFilter;
 import com.finflow.transaction_service.event.TransferCompletedEvent;
 import com.finflow.transaction_service.event.TransferEventProducer;
 import com.finflow.transaction_service.service.OutboxEventClaimer;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.MDC;
 
 import java.time.Instant;
 import java.util.List;
@@ -80,6 +82,27 @@ class OutboxEventPublisherTest {
     }
 
     @Test
+    void shouldRelayTheEventsCorrelationId() throws Exception {
+        OutboxEvent event;
+        MDC.put(CorrelationIdFilter.MDC_KEY, "demo-123");
+        try {
+            event = claimedEvent("worker-1");
+        } finally {
+            MDC.remove(CorrelationIdFilter.MDC_KEY);
+        }
+        when(claimer.claimBatch(any(Integer.class), any()))
+                .thenReturn(List.of(event));
+
+        publisher.publishBatch();
+
+        verify(producer).publishAndAwait(
+                any(TransferCompletedEvent.class),
+                eq("demo-123")
+        );
+        assertThat(MDC.get(CorrelationIdFilter.MDC_KEY)).isNull();
+    }
+
+    @Test
     void shouldPublishValidEventAndMarkItPublished() throws Exception {
         String workerId = "worker-1";
         UUID sourceAccountId = UUID.randomUUID();
@@ -107,7 +130,8 @@ class OutboxEventPublisherTest {
         publisher.publishBatch();
 
         verify(producer).publishAndAwait(
-                any(TransferCompletedEvent.class)
+                any(TransferCompletedEvent.class),
+                any()
         );
         verify(statusService).markPublished(event.getId(), workerId);
         verify(statusService, never()).markFailed(
@@ -137,7 +161,7 @@ class OutboxEventPublisherTest {
 
         doThrow(new RuntimeException("Kafka unavailable"))
                 .when(producer)
-                .publishAndAwait(any(TransferCompletedEvent.class));
+                .publishAndAwait(any(TransferCompletedEvent.class), any());
 
         publisher.publishBatch();
 
@@ -158,7 +182,7 @@ class OutboxEventPublisherTest {
         publisher.publishBatch();
 
         verify(producer, never())
-                .publishAndAwait(any(TransferCompletedEvent.class));
+                .publishAndAwait(any(TransferCompletedEvent.class), any());
     }
 
     @Test
@@ -192,7 +216,7 @@ class OutboxEventPublisherTest {
 
         doThrow(new RuntimeException("Kafka unavailable"))
                 .when(producer)
-                .publishAndAwait(any(TransferCompletedEvent.class));
+                .publishAndAwait(any(TransferCompletedEvent.class), any());
 
         when(statusService.markFailed(eq(event.getId()), eq(workerId), any()))
                 .thenReturn(true);
@@ -223,7 +247,7 @@ class OutboxEventPublisherTest {
         publisher.publishBatch();
 
         // The healthy event is still processed and marked published.
-        verify(producer, times(2)).publishAndAwait(any(TransferCompletedEvent.class));
+        verify(producer, times(2)).publishAndAwait(any(TransferCompletedEvent.class), any());
         verify(statusService).markPublished(healthy.getId(), workerId);
         assertThat(count("published")).isEqualTo(1.0);
         assertThat(count("status_update_failed")).isEqualTo(1.0);
@@ -245,7 +269,7 @@ class OutboxEventPublisherTest {
 
         publisher.publishBatch();
 
-        verify(producer, times(2)).publishAndAwait(any(TransferCompletedEvent.class));
+        verify(producer, times(2)).publishAndAwait(any(TransferCompletedEvent.class), any());
         verify(statusService).markPublished(second.getId(), workerId);
         // A lost status update is never turned into markFailed (which would
         // throw for the same reason) and never aborts the batch.
@@ -271,7 +295,7 @@ class OutboxEventPublisherTest {
         publisher.publishBatch();
 
         verify(statusService).markFailed(eq(broken.getId()), eq(workerId), any(String.class));
-        verify(producer, times(1)).publishAndAwait(any(TransferCompletedEvent.class));
+        verify(producer, times(1)).publishAndAwait(any(TransferCompletedEvent.class), any());
         verify(statusService).markPublished(healthy.getId(), workerId);
     }
 
@@ -292,7 +316,7 @@ class OutboxEventPublisherTest {
 
         verify(statusService).markFailed(
                 eq(orphan.getId()), eq(workerId), eq("No relay registered for event type UNKNOWN_TYPE"));
-        verify(producer, times(1)).publishAndAwait(any(TransferCompletedEvent.class));
+        verify(producer, times(1)).publishAndAwait(any(TransferCompletedEvent.class), any());
         verify(statusService).markPublished(healthy.getId(), workerId);
     }
 
@@ -306,7 +330,7 @@ class OutboxEventPublisherTest {
                 throw new RuntimeException("Kafka unavailable");
             }
             return null;
-        }).when(producer).publishAndAwait(any(TransferCompletedEvent.class));
+        }).when(producer).publishAndAwait(any(TransferCompletedEvent.class), any());
     }
 
     private static String idIn(String payload) {

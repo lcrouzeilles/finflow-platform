@@ -1,8 +1,10 @@
 
 package com.finflow.transaction_service.domain.outbox;
 
+import com.finflow.transaction_service.config.CorrelationIdFilter;
 import jakarta.persistence.*;
 import lombok.Getter;
+import org.slf4j.MDC;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -58,6 +60,10 @@ public class OutboxEvent {
     @Column(name = "next_attempt_at")
     private Instant nextAttemptAt;
 
+    /** Correlation id of the originating request, if there was one. */
+    @Column(name = "correlation_id", length = 64)
+    private String correlationId;
+
     protected OutboxEvent() {
         // Required by JPA
     }
@@ -92,6 +98,7 @@ public class OutboxEvent {
         this.payload = payload;
         this.createdAt = Instant.now();
         this.attempts = 0;
+        this.correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
     }
 
     public void markPublished() {

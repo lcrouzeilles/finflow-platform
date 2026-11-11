@@ -28,10 +28,10 @@ public class TransferOutboxRelay implements OutboxEventRelay {
     }
 
     @Override
-    public void publishAndAwait(String payload) throws Exception {
+    public void publishAndAwait(String payload, String correlationId) throws Exception {
         TransferCompletedEvent event =
                 objectMapper.readValue(payload, TransferCompletedEvent.class);
 
-        producer.publishAndAwait(event);
+        producer.publishAndAwait(event, correlationId);
     }
 }

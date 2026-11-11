@@ -14,6 +14,10 @@ public interface OutboxEventRelay {
     /**
      * Deserializes the stored payload and publishes it, waiting for the
      * broker acknowledgement. Any exception marks the event as failed.
+     *
+     * @param correlationId id of the originating request, sent as the
+     *                      X-Correlation-Id header; {@code null} when the
+     *                      event has none
      */
-    void publishAndAwait(String payload) throws Exception;
+    void publishAndAwait(String payload, String correlationId) throws Exception;
 }

@@ -1,8 +1,11 @@
 package com.finflow.transaction_service.event;
 
+import com.finflow.transaction_service.config.CorrelationIdFilter;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -21,13 +24,21 @@ public class TransferEventProducer {
         this.kafkaTemplate = kafkaTemplate;
     }
 
-    public void publishAndAwait(TransferCompletedEvent event)
+    public void publishAndAwait(TransferCompletedEvent event, String correlationId)
             throws ExecutionException, InterruptedException, TimeoutException {
 
-        kafkaTemplate.send(
+        ProducerRecord<String, TransferCompletedEvent> record = new ProducerRecord<>(
                 TOPIC,
                 event.sourceAccountId().toString(),
                 event
-        ).get(ACK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        );
+        if (correlationId != null) {
+            record.headers().add(
+                    CorrelationIdFilter.HEADER,
+                    correlationId.getBytes(StandardCharsets.UTF_8)
+            );
+        }
+
+        kafkaTemplate.send(record).get(ACK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 }

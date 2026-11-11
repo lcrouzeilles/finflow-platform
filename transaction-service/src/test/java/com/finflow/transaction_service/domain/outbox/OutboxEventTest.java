@@ -1,6 +1,8 @@
 package com.finflow.transaction_service.domain.outbox;
 
+import com.finflow.transaction_service.config.CorrelationIdFilter;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -24,6 +26,21 @@ class OutboxEventTest {
         assertThat(event.getLastError()).isNull();
         assertThat(event.getClaimedBy()).isNull();
         assertThat(event.getClaimUntil()).isNull();
+    }
+
+    @Test
+    void shouldCaptureTheCorrelationIdOfTheCurrentRequest() {
+        MDC.put(CorrelationIdFilter.MDC_KEY, "demo-123");
+        try {
+            assertThat(createEvent().getCorrelationId()).isEqualTo("demo-123");
+        } finally {
+            MDC.remove(CorrelationIdFilter.MDC_KEY);
+        }
+    }
+
+    @Test
+    void shouldHaveNoCorrelationIdOutsideARequest() {
+        assertThat(createEvent().getCorrelationId()).isNull();
     }
 
     @Test
