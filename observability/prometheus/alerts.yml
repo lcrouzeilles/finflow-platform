@@ -1,0 +1,74 @@
+# Alert rules for the transaction service. Prometheus evaluates them and
+# shows them under /alerts (and Grafana through the ALERTS series); routing
+# to a pager or chat would be Alertmanager's job, which this stack omits.
+# Unit tests: alerts.test.yml (promtool test rules).
+groups:
+  - name: finflow-transaction-service
+    rules:
+      - alert: TransactionServiceDown
+        expr: up{job="transaction-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: transaction-service cannot be scraped
+          description: Prometheus has not reached /actuator/prometheus for over a minute.
+
+      # max_over_time keeps the alert up for a minute after the breaker
+      # leaves the open state, so a short open/half-open cycle between
+      # scrapes is not missed and does not flap.
+      - alert: StripeCircuitBreakerOpen
+        expr: max by (name) (max_over_time(resilience4j_circuitbreaker_state{state=~"open|forced_open"}[1m])) == 1
+        labels:
+          severity: critical
+        annotations:
+          summary: "Stripe circuit breaker {{ $labels.name }} is open"
+          description: >-
+            Calls to Stripe are failing; new deposits are rejected with 503
+            until the breaker closes again.
+
+      - alert: OutboxNotDraining
+        expr: finflow_outbox_oldest_pending_age_seconds > 120
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Outbox events are not being published
+          description: >-
+            The oldest pending outbox event is {{ $value | humanizeDuration }}
+            old. Kafka or the outbox publisher is down, so completed
+            transfers and deposits are not reaching consumers.
+
+      - alert: OutboxEventsExhausted
+        expr: finflow_outbox_failed > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} outbox events exhausted their retries"
+          description: >-
+            These events will not be published again on their own and need
+            an operator (outbox_events.failed_at is set).
+
+      - alert: HighServerErrorRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{job="transaction-service",uri!~"/actuator.*",status=~"5.."}[5m]))
+            / sum(rate(http_server_requests_seconds_count{job="transaction-service",uri!~"/actuator.*"}[5m]))
+            > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of API requests fail with 5xx"
+          description: More than 5% of API requests have returned a server error for 5 minutes.
+
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_server_requests_seconds_bucket{job="transaction-service",uri!~"/actuator.*"}[5m]))
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p95 latency is {{ $value | humanizeDuration }}"
+          description: The 95th percentile of API latency has been above 500ms for 5 minutes.

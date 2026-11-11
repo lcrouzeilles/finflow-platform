@@ -38,6 +38,8 @@ finflow-transaction-platform/
 ├── api-gateway/
 ├── transaction-service/
 ├── keycloak/
+├── observability/        (Tempo, Prometheus + alert rules, Grafana provisioning)
+├── perf/                 (k6 load and resilience scenarios)
 ├── docker-compose.yml
 └── README.md
 ```
@@ -58,6 +60,7 @@ The project uses a single Git repository with independently deployable Spring Bo
 - Apache Kafka (Spring for Apache Kafka)
 - Stripe (Checkout Sessions and webhooks, test mode) with Resilience4j
 - OpenAPI / Swagger
+- Micrometer, OpenTelemetry (OTLP), Grafana Tempo, Prometheus, Grafana
 - Docker / Docker Compose
 - Testcontainers
 - Maven
@@ -95,6 +98,9 @@ The project uses a single Git repository with independently deployable Spring Bo
 | Redis | `6379` | `6379` |
 | Kafka (external listener) | `9094` | `9094` |
 | Transaction Service | — | `8080` |
+| Grafana (localhost only) | `${GRAFANA_PORT}` (default `3000`) | `3000` |
+| Prometheus (localhost only) | `${PROMETHEUS_PORT}` (default `9090`) | `9090` |
+| Tempo | — | `3200`, `4318` (OTLP/HTTP) |
 
 The Transaction Service is accessible internally through:
 
@@ -116,6 +122,7 @@ cp .env.example .env
 | `KC_BOOTSTRAP_ADMIN_USERNAME`, `KC_BOOTSTRAP_ADMIN_PASSWORD` | Keycloak admin console |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Transaction Service (Stripe test mode: `sk_test_...` and `whsec_...`) |
 | `GATEWAY_PORT` | Host port of the API Gateway (default `8080`); change it if that port is taken. Stripe Checkout redirects follow it |
+| `GRAFANA_PORT`, `PROMETHEUS_PORT` | Host ports of Grafana (default `3000`) and Prometheus (default `9090`), bound to `127.0.0.1` |
 
 `keycloak/finflow-realm.json` is imported on the first start of Keycloak and contains only generic demo identities, no real users:
 
@@ -216,7 +223,7 @@ Amounts accept at most 15 integer digits and 2 decimals.
 - Failures are retried with exponential backoff (1s, 2s, ... capped at 300s). After `finflow.outbox.max-attempts` (default `10`) failed attempts the event is marked terminally failed (`failed_at`) and stops being retried; it stays in the table for inspection and manual repair.
 - A failure on one event, including a failure to record its status after the lease expired, never aborts the rest of the batch.
 - Delivery is **at least once**: an event delivered to Kafka whose status update fails is delivered again. Consumers must deduplicate on `eventId`; the payload also carries `transactionId` for correlation.
-- Metrics: the counter `finflow.outbox.events` is tagged with `result=published|failed|exhausted|status_update_failed`.
+- Metrics: the counter `finflow.outbox.events` is tagged with `result=published|failed|exhausted|status_update_failed`; the gauges `finflow.outbox.pending`, `finflow.outbox.oldest.pending.age` and `finflow.outbox.failed` are read from the database on each scrape, so they cover every publisher instance and survive restarts; `finflow.outbox.publish` times each publication by event type.
 
 ## Observability
 
@@ -228,13 +235,46 @@ gateway → transaction service (MDC) → outbox_events.correlation_id → Kafka
 
 Webhooks and requests rejected by security get an id as well. Events created outside a request (for example by the reconciliation job) have none.
 
-**Logs.** Every log line includes the id: as a `[correlation-id]` prefix when running locally, and as the `correlationId` field in the JSON (ECS) logs the `docker` profile writes. Transfers, account creation, deposits and outbox failures are logged at `INFO`/`WARN`, with ids rather than personal data.
+**Logs.** Every log line includes the id and the current trace and span ids: as a `[correlation-id] [traceId,spanId]` prefix when running locally, and as the `correlationId`, `traceId` and `spanId` fields in the JSON (ECS) logs the `docker` profile writes. Transfers, account creation, deposits and outbox failures are logged at `INFO`/`WARN`, with ids rather than personal data.
 
-**Metrics.** `/actuator/prometheus` exposes the Micrometer registry in Prometheus format: the outbox counters, the Stripe circuit breaker and retry metrics (`resilience4j_*`), the reconciliation discrepancy counter, plus JVM, HTTP and connection-pool metrics. It needs no token so a scraper can reach it, which is safe here because the gateway does not route `/actuator/**` and Docker Compose does not publish the transaction service's port. `/actuator/metrics` still requires a JWT.
+**Traces.** Both applications record Micrometer observations through the OpenTelemetry bridge and, in the `docker` profile, export them over OTLP/HTTP to Grafana Tempo (every request is sampled there; production would keep the 10% default or less). Without an endpoint nothing is exported, so tests and plain local runs are unaffected. The W3C `traceparent` header carries the trace from the gateway to the service and onto Kafka records. The outbox is drained by a scheduled job, which would cut the trace at the database, so each `outbox_events` row stores the `traceparent` of the request that wrote it and the publisher continues that trace. A transfer is therefore a single trace:
+
+```text
+gateway  http post /transfers/**
+└─ transaction-service  http post /transfers  (+ Redis cache evictions)
+   └─ outbox publish        (scheduled, parent restored from outbox_events.trace_parent)
+      └─ finflow.transfer.completed send     (Kafka producer)
+         └─ finflow.transfer.completed process  (Kafka listener)
+```
+
+Open Grafana → Explore → Tempo and search by service, or paste a `traceId` from a log line.
+
+**Metrics.** `/actuator/prometheus` exposes the Micrometer registry in Prometheus format: the outbox counters and backlog gauges, the Stripe circuit breaker and retry metrics (`resilience4j_*`), the reconciliation discrepancy counter, plus JVM, HTTP (with histogram buckets, for percentiles), Kafka and connection-pool metrics. It needs no token so a scraper can reach it, which is safe here because the gateway does not route `/actuator/**` and Docker Compose does not publish the transaction service's port. `/actuator/metrics` still requires a JWT.
 
 ```bash
 docker compose exec transaction-service curl -s localhost:8080/actuator/prometheus | grep finflow_outbox
 ```
+
+**Alerts.** Prometheus scrapes the service every 10s and evaluates [`observability/prometheus/alerts.yml`](observability/prometheus/alerts.yml):
+
+| Alert | Fires when | Severity |
+|---|---|---|
+| `TransactionServiceDown` | the service cannot be scraped for 1 minute | critical |
+| `StripeCircuitBreakerOpen` | a Stripe circuit breaker was open at any point in the last minute | critical |
+| `OutboxNotDraining` | the oldest pending outbox event is older than 2 minutes, for 1 minute | critical |
+| `OutboxEventsExhausted` | any outbox event exhausted its retries and needs an operator | warning |
+| `HighServerErrorRate` | more than 5% of API requests return 5xx, for 5 minutes | critical |
+| `HighLatency` | API p95 latency is above 500ms, for 5 minutes | warning |
+
+The rules have unit tests ([`alerts.test.yml`](observability/prometheus/alerts.test.yml)):
+
+```bash
+docker run --rm --entrypoint promtool -v "$PWD/observability/prometheus:/rules" -w /rules prom/prometheus:v3.5.0 test rules alerts.test.yml
+```
+
+Firing alerts show up in Prometheus (`/alerts`) and on the dashboard. Delivering them to a pager or chat is Alertmanager's job, which this local stack leaves out. During the `stripe-outage` scenario (see [Performance and Resilience Testing](#performance-and-resilience-testing)) `StripeCircuitBreakerOpen` fired about 15 seconds after the outage began, and `HighServerErrorRate` and `HighLatency` went pending while their 5-minute windows were not met.
+
+**Dashboard.** Grafana (`http://localhost:3000`, anonymous admin, bound to localhost) is provisioned with Prometheus and Tempo data sources and the *FinFlow transaction service* dashboard: firing alerts, circuit breaker states, outbox backlog, request rate by status, 5xx ratio, p95 latency per endpoint, Stripe calls and outbox publication results.
 
 ## Payments
 
@@ -358,10 +398,10 @@ git archive --format=zip --output finflow-$(git rev-parse --short HEAD).zip HEAD
 - [x] Stripe deposits: Checkout, exactly-once webhooks, resilience, reconciliation
 - [x] Observability: correlation ids end to end, structured logs, Prometheus metrics
 - [x] Performance and resilience testing (k6 scenarios against a simulated Stripe)
+- [x] Distributed tracing (OpenTelemetry, Tempo) and alerting (Prometheus rules, Grafana dashboard)
 
 ### Next
 - [ ] Kubernetes
-- [ ] Distributed tracing and alerting
 - [ ] Cloud deployment
 
 ## Project Goal
@@ -407,9 +447,8 @@ roadmap unless required by a new feature or a correctness issue.
 -   [ ] Provide an operational mechanism to inspect, repair, and replay
     failed events. *(Terminally failed events are kept in
     `outbox_events` with `failed_at` set; no admin endpoint yet.)*
--   [ ] Add monitoring for pending events, retry counts, publication
-    failures, and event processing delays. *(Partial: publisher result
-    counters exist; no gauges for backlog age or alerts yet.)*
+-   [x] Add monitoring for pending events, retry counts, publication
+    failures, and event processing delays.
 -   [ ] Expand failure-recovery tests to cover process crashes, Kafka
     timeouts, and lease expiration.
 
@@ -452,9 +491,11 @@ roadmap unless required by a new feature or a correctness issue.
     retry activity, and consumer failures. *(Partial: outbox publication,
     Stripe retry/circuit breaker and reconciliation counters, exported to
     Prometheus; no transfer or consumer-specific metrics yet.)*
--   [ ] Add distributed tracing across the API gateway, transaction
-    service, and asynchronous workflows.
--   [ ] Define alerts for stuck outbox events and repeated publication
+-   [x] Add distributed tracing across the API gateway, transaction
+    service, and asynchronous workflows. *(Database and Stripe calls are
+    not traced yet: a JDBC or HTTP-client instrumentation would show
+    where time goes inside a request.)*
+-   [x] Define alerts for stuck outbox events and repeated publication
     failures.
 
 ### 8. Infrastructure and Configuration

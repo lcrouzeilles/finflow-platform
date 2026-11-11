@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  # /actuator/prometheus is open on the internal network only; the gateway
+  # does not route /actuator/** and the service port is not published.
+  - job_name: transaction-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: [ "transaction-service:8080" ]

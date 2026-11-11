@@ -1,0 +1,136 @@
+# promtool test rules alerts.test.yml (see README, "Observability").
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 10s
+
+tests:
+  - interval: 10s
+    input_series:
+      - series: 'up{job="transaction-service",instance="transaction-service:8080"}'
+        values: '1 1 0x12'
+    alert_rule_test:
+      - eval_time: 40s
+        alertname: TransactionServiceDown
+        exp_alerts: []
+      - eval_time: 90s
+        alertname: TransactionServiceDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: transaction-service
+              instance: transaction-service:8080
+            exp_annotations:
+              summary: transaction-service cannot be scraped
+              description: Prometheus has not reached /actuator/prometheus for over a minute.
+
+  # Open from 20s to 30s only: fires at once and stays up for a minute.
+  - interval: 10s
+    input_series:
+      - series: 'resilience4j_circuitbreaker_state{name="stripe-checkout",state="open"}'
+        values: '0 0 1 1 0x12'
+      - series: 'resilience4j_circuitbreaker_state{name="stripe-checkout",state="closed"}'
+        values: '1 1 0 0 1x12'
+    alert_rule_test:
+      - eval_time: 10s
+        alertname: StripeCircuitBreakerOpen
+        exp_alerts: []
+      - eval_time: 80s
+        alertname: StripeCircuitBreakerOpen
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              name: stripe-checkout
+            exp_annotations:
+              summary: Stripe circuit breaker stripe-checkout is open
+              description: >-
+                Calls to Stripe are failing; new deposits are rejected with 503
+                until the breaker closes again.
+      - eval_time: 100s
+        alertname: StripeCircuitBreakerOpen
+        exp_alerts: []
+
+  # The oldest pending event ages 10s every 10s: over 120s from 130s, firing
+  # one minute later.
+  - interval: 10s
+    input_series:
+      - series: 'finflow_outbox_oldest_pending_age_seconds'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 150s
+        alertname: OutboxNotDraining
+        exp_alerts: []
+      - eval_time: 200s
+        alertname: OutboxNotDraining
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: Outbox events are not being published
+              description: >-
+                The oldest pending outbox event is 3m 20s
+                old. Kafka or the outbox publisher is down, so completed
+                transfers and deposits are not reaching consumers.
+
+  - interval: 10s
+    input_series:
+      - series: 'finflow_outbox_failed'
+        values: '0 0 2'
+    alert_rule_test:
+      - eval_time: 10s
+        alertname: OutboxEventsExhausted
+        exp_alerts: []
+      - eval_time: 20s
+        alertname: OutboxEventsExhausted
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 2 outbox events exhausted their retries
+              description: >-
+                These events will not be published again on their own and need
+                an operator (outbox_events.failed_at is set).
+
+  # 600 requests a minute, 10% of them 503; actuator requests do not count.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="transaction-service",uri="/transfers",status="201"}'
+        values: '0+540x10'
+      - series: 'http_server_requests_seconds_count{job="transaction-service",uri="/deposits",status="503"}'
+        values: '0+60x10'
+      - series: 'http_server_requests_seconds_count{job="transaction-service",uri="/actuator/prometheus",status="500"}'
+        values: '0+6000x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: HighServerErrorRate
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: HighServerErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: 10% of API requests fail with 5xx
+              description: More than 5% of API requests have returned a server error for 5 minutes.
+
+  # Every request takes between 100ms and 1s: p95 interpolates to 955ms.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_bucket{job="transaction-service",uri="/transfers",le="0.1"}'
+        values: '0x10'
+      - series: 'http_server_requests_seconds_bucket{job="transaction-service",uri="/transfers",le="1.0"}'
+        values: '0+60x10'
+      - series: 'http_server_requests_seconds_bucket{job="transaction-service",uri="/transfers",le="+Inf"}'
+        values: '0+60x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: HighLatency
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: HighLatency
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: API p95 latency is 955ms
+              description: The 95th percentile of API latency has been above 500ms for 5 minutes.
