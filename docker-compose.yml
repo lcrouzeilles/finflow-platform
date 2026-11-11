@@ -99,6 +99,26 @@ services:
 
     volumes:
       - finflow-kafka-data:/var/lib/kafka/data
+  tempo:
+    image: grafana/tempo:2.8.1
+    container_name: finflow-tempo
+    command: [ "-config.file=/etc/tempo/tempo.yaml" ]
+    volumes:
+      - ./observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+  grafana:
+    image: grafana/grafana:12.1.1
+    container_name: finflow-grafana
+    # Anonymous admin, so it is bound to localhost only.
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - tempo
 
 volumes:
   finflow-postgres-data:
