@@ -40,6 +40,7 @@ finflow-transaction-platform/
 ├── keycloak/
 ├── observability/        (Tempo, Prometheus + alert rules, Grafana provisioning)
 ├── perf/                 (k6 load and resilience scenarios)
+├── k8s/                  (Kustomize manifests and deploy script for a local cluster)
 ├── docker-compose.yml
 └── README.md
 ```
@@ -62,6 +63,7 @@ The project uses a single Git repository with independently deployable Spring Bo
 - OpenAPI / Swagger
 - Micrometer, OpenTelemetry (OTLP), Grafana Tempo, Prometheus, Grafana
 - Docker / Docker Compose
+- Kubernetes (Kustomize)
 - Testcontainers
 - Maven
 
@@ -85,10 +87,13 @@ The project uses a single Git repository with independently deployable Spring Bo
 - Keycloak identity management
 - API Gateway routing and security
 - Dockerized local environment
+- Kubernetes deployment (local cluster) with probes, pod security and two service replicas
 - Integration testing with Testcontainers
 - OpenAPI documentation
 
 ## Docker Environment
+
+Docker Compose runs the whole platform on one host; see [Kubernetes](#kubernetes-local-cluster) for the cluster deployment.
 
 | Service | Host Port | Container Port |
 |---|---:|---:|
@@ -164,6 +169,33 @@ Swagger UI:
 ```text
 http://localhost:8080/swagger-ui/index.html
 ```
+
+### Kubernetes (local cluster)
+
+The same platform runs on Docker Desktop's built-in Kubernetes (Settings → Kubernetes → Enable). Manifests use Kustomize:
+
+| Path | Contents |
+|---|---|
+| `k8s/base` | The gateway and the transaction service: probes on the actuator health groups, resource requests and memory limits, `restricted` pod security (non-root UID 10001, read-only root filesystem, no capabilities, `RuntimeDefault` seccomp), rolling updates with no unavailable pod, two service replicas and a PodDisruptionBudget |
+| `k8s/infra` | Development stand-ins for PostgreSQL, Redis, Kafka (single KRaft node) and Keycloak; managed services replace them in the cloud |
+| `k8s/observability` | Tempo, Prometheus (discovers every service pod, shares the alert rules with Compose) and Grafana |
+| `k8s/overlays/local` | Everything in the `finflow` namespace; the gateway and Keycloak published on `localhost:8180` and `localhost:8181`, so the Compose stack can keep running |
+| `k8s/overlays/perf` | The local overlay with WireMock in place of Stripe, for the k6 scenarios |
+
+```bash
+k8s/deploy.sh                 # build images, create the Secret and ConfigMaps, apply, wait for every rollout
+kubectl --context docker-desktop -n finflow get pods
+kubectl --context docker-desktop -n finflow port-forward svc/grafana 3000:3000
+kubectl --context docker-desktop delete namespace finflow   # remove everything
+```
+
+`deploy.sh` builds the images through Docker Compose (`finflow/*:local`); the cluster pulls them through Docker Desktop's registry mirror, so no registry is involved. It creates the `finflow-secrets` Secret from `.env`, so no credential lives in the manifests, and the ConfigMaps for the files shared with Compose (Keycloak realm, Tempo config, alert rules, Grafana provisioning). Tokens come from `http://localhost:8181`, which is the issuer the local overlay configures; the services read the keys from `keycloak:8080` inside the cluster.
+
+The probes are `/actuator/health/liveness` and `/actuator/health/readiness`, open without a token. The service's readiness includes the database, so a pod that cannot reach it leaves the Service instead of failing requests, while liveness ignores it so a database outage never restarts pods. The first service pods may restart once while PostgreSQL is still starting.
+
+CI renders every overlay and validates it against the Kubernetes API schemas with kubeconform.
+
+If `kubectl` fails with `x509: certificate signed by unknown authority` on Windows, an antivirus is probably intercepting HTTPS to the local API server: add an exception for `https://127.0.0.1:<port>` (see `kubectl config view`) rather than skipping TLS verification.
 
 ### Stripe webhooks (local smoke test)
 
@@ -330,7 +362,7 @@ cd transaction-service
 ./mvnw verify
 ```
 
-CI runs the same command on GitHub Actions.
+CI runs the same command on GitHub Actions, plus the alert rule tests (`promtool`) and the Kubernetes manifest validation.
 
 If Maven cannot download dependencies on Windows because an antivirus or proxy intercepts TLS (`PKIX path building failed`), let the JVM use the Windows certificate store instead of disabling verification:
 
@@ -368,6 +400,24 @@ Results on a single development machine (12 CPUs, Docker Desktop on Windows, eve
 
 What the numbers show: under contention the pessimistic locks serialize the hot accounts without errors or lost updates, and only the tail latency grows. The webhook deduplication holds under a concurrent burst. During a Stripe outage the client stops waiting on a failing dependency within a few calls.
 
+**On the local Kubernetes cluster** (two transaction-service replicas):
+
+```bash
+OVERLAY=perf k8s/deploy.sh
+TARGET=k8s perf/run.sh transfers -e RATE=100 -e DURATION=60s
+TARGET=k8s perf/run.sh webhook-duplicates
+TARGET=k8s perf/run.sh stripe-outage
+k8s/deploy.sh                               # back to the normal overlay
+```
+
+| Scenario | Load | Result |
+|---|---|---|
+| `transfers` | 100 req/s for 60s | 6,001 transfers, 0 unexpected statuses, p95 27 ms, money conserved. Both pods publish outbox events (no event failed or published twice); the backlog stays under 100 events, about a second old |
+| `webhook-duplicates` | 200 deliveries, 50 concurrent, spread over both pods | All `200`; balance credited once |
+| `stripe-outage` | 5 deposits/s | 97 of 100 outage-phase deposits rejected with `503`, all `201` after recovery, no orphan deposits. p95 during the outage is 623 ms (31 ms with Compose): each pod has its own circuit breaker and pays for its own retries before opening |
+
+The first cluster run found a capacity limit that the Compose runs had not looked at: the outbox publisher claimed one batch of 10 events per second per instance, so at 100 transfers/s the backlog grew to 4,823 pending events in a minute (and `OutboxNotDraining` would have fired). The publisher now keeps claiming while batches come back full, bounded per run. With one partition on `finflow.transfer.completed`, a single pod consumes the topic; more partitions would spread consumption too.
+
 ## Sharing a Snapshot
 
 Create archives from Git so that `.env`, `.git/`, `target/` and IDE metadata are never included:
@@ -399,9 +449,9 @@ git archive --format=zip --output finflow-$(git rev-parse --short HEAD).zip HEAD
 - [x] Observability: correlation ids end to end, structured logs, Prometheus metrics
 - [x] Performance and resilience testing (k6 scenarios against a simulated Stripe)
 - [x] Distributed tracing (OpenTelemetry, Tempo) and alerting (Prometheus rules, Grafana dashboard)
+- [x] Kubernetes (Kustomize, local cluster, manifests validated in CI)
 
 ### Next
-- [ ] Kubernetes
 - [ ] Cloud deployment
 
 ## Project Goal

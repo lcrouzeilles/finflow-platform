@@ -60,3 +60,45 @@ jobs:
 
       - name: Verify
         run: ./mvnw --batch-mode verify
+
+  kubernetes-manifests:
+    name: Kubernetes manifests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Renders every overlay and validates the result against the
+      # Kubernetes API schemas (no cluster needed).
+      - name: Render and validate overlays
+        run: |
+          for overlay in k8s/overlays/*/; do
+            echo "::group::$overlay"
+            kubectl kustomize "$overlay" \
+              | docker run --rm -i ghcr.io/yannh/kubeconform:v0.7.0 \
+                  -strict -summary -kubernetes-version 1.33.0 -
+            echo "::endgroup::"
+          done
+
+  observability:
+    name: Prometheus config and alert rules
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check config and run alert rule tests
+        run: |
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/observability/prometheus:/etc/prometheus:ro" \
+            prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/observability/prometheus:/rules:ro" -w /rules \
+            prom/prometheus:v3.5.0 test rules alerts.test.yml
+          # The cluster variant, with the shared rules where it mounts them.
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/k8s/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+            -v "$PWD/observability/prometheus:/etc/prometheus/rules:ro" \
+            prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
