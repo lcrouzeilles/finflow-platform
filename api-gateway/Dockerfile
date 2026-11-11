@@ -14,11 +14,12 @@ FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 
-RUN groupadd --system app && useradd --system --gid app --no-create-home app
+# Fixed numeric ids, so Kubernetes can enforce runAsNonRoot.
+RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid app --no-create-home app
 
 COPY --from=builder --chown=app:app /app/target/api-gateway-0.0.1-SNAPSHOT.jar app.jar
 
-USER app
+USER 10001:10001
 
 EXPOSE 8080
 

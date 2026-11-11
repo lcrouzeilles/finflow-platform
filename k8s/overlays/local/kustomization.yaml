@@ -1,0 +1,44 @@
+# Local cluster (Docker Desktop Kubernetes): applications, development
+# dependencies and observability in the finflow namespace. Deploy with
+# k8s/deploy.sh, which also creates the Secret and the file-based
+# ConfigMaps this overlay expects.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: finflow
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - ../../infra
+  - ../../observability
+  - external-services.yaml
+
+configMapGenerator:
+  # Values that depend on where the cluster is reached from. Tokens are
+  # requested from the host through keycloak-external, so their issuer is
+  # http://localhost:8181/realms/finflow.
+  - name: finflow-config
+    literals:
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI=http://localhost:8181/realms/finflow
+      - STRIPE_SUCCESS_URL=http://localhost:8180/deposits/success
+      - STRIPE_CANCEL_URL=http://localhost:8180/deposits/cancel
+
+# Built by Docker Compose (k8s/deploy.sh); Docker Desktop's registry mirror
+# serves them to the cluster from the local image store.
+images:
+  - name: finflow/transaction-service
+    newTag: local
+  - name: finflow/api-gateway
+    newTag: local
+
+# The tag never changes between builds, so pull on every start to pick up
+# the image just built (from the local mirror, a few seconds).
+patches:
+  - target:
+      kind: Deployment
+      labelSelector: app.kubernetes.io/part-of=finflow
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always

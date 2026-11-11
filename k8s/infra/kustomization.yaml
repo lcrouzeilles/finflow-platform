@@ -1,0 +1,11 @@
+# Development stand-ins for the platform's dependencies. In a cloud
+# environment these become managed services (database, cache, Kafka,
+# identity provider) and this directory is not deployed.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - postgres.yaml
+  - redis.yaml
+  - kafka.yaml
+  - keycloak.yaml

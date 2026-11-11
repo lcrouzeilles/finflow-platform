@@ -1,0 +1,9 @@
+# The two applications. Environment-specific values (JWT issuer, Stripe
+# redirect URLs, exposure) come from an overlay; the finflow-secrets Secret
+# is created outside git (see k8s/deploy.sh).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - transaction-service.yaml
+  - api-gateway.yaml

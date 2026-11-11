@@ -18,11 +18,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd --system app && useradd --system --gid app --no-create-home app
+# Fixed numeric ids, so Kubernetes can enforce runAsNonRoot.
+RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid app --no-create-home app
 
 COPY --from=builder --chown=app:app /app/target/transaction-service-0.0.1-SNAPSHOT.jar app.jar
 
-USER app
+USER 10001:10001
 
 EXPOSE 8080
 

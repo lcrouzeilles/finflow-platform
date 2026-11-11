@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transaction-service
+  labels:
+    app.kubernetes.io/name: transaction-service
+    app.kubernetes.io/part-of: finflow
+spec:
+  # Two replicas on purpose: the outbox publisher runs in every pod and the
+  # claim (FOR UPDATE SKIP LOCKED + lease) must split the work between them.
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: transaction-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: transaction-service
+        app.kubernetes.io/part-of: finflow
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /actuator/prometheus
+        prometheus.io/port: "8080"
+    spec:
+      # Service links would inject variables such as KAFKA_PORT, which
+      # some images read as configuration; nothing here relies on them.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: transaction-service
+          image: finflow/transaction-service
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # The "docker" profile addresses dependencies by service name
+            # (postgres, redis, kafka, keycloak, tempo); the Kubernetes
+            # Services use the same names.
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker
+            - name: JAVA_TOOL_OPTIONS
+              value: -XX:MaxRAMPercentage=75
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef: { name: finflow-secrets, key: DB_USERNAME }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: finflow-secrets, key: DB_PASSWORD }
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: finflow-secrets, key: STRIPE_SECRET_KEY }
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef: { name: finflow-secrets, key: STRIPE_WEBHOOK_SECRET }
+          envFrom:
+            # Environment-specific settings (issuer, redirect URLs) from the overlay.
+            - configMapRef:
+                name: finflow-config
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 768Mi
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ "ALL" ]
+          volumeMounts:
+            # Tomcat and the JVM need a writable /tmp.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: { }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transaction-service
+  labels:
+    app.kubernetes.io/name: transaction-service
+    app.kubernetes.io/part-of: finflow
+spec:
+  selector:
+    app.kubernetes.io/name: transaction-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: transaction-service
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: transaction-service
