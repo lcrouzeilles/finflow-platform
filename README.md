@@ -298,6 +298,36 @@ If Maven cannot download dependencies on Windows because an antivirus or proxy i
 $env:MAVEN_OPTS = "-Djavax.net.ssl.trustStoreType=WINDOWS-ROOT"
 ```
 
+## Performance and Resilience Testing
+
+`perf/` holds three [k6](https://k6.io) scenarios that run against the full Docker stack. The overlay `perf/docker-compose.perf.yml` replaces Stripe with WireMock (`fake-stripe`) and gives the service throwaway credentials, so no Stripe account or key is needed. Accounts are funded through the real path, a deposit followed by a signed `checkout.session.completed` webhook; nothing is written to the database by hand. The scenarios are manual, like the Stripe smoke test, and are not part of CI.
+
+```bash
+docker compose -f docker-compose.yml -f perf/docker-compose.perf.yml up -d --build
+perf/run.sh transfers                       # -e RATE=300 -e DURATION=30s to push harder
+perf/run.sh webhook-duplicates
+perf/run.sh stripe-outage
+docker compose up -d                        # back to the normal stack
+```
+
+| Scenario | What it checks |
+|---|---|
+| `transfers` | Constant-rate transfers over 10 funded accounts, 80% of them between the same two accounts so they queue on the row locks. Every response is `201` or `422` (insufficient funds), and the sum of all balances is unchanged at the end. |
+| `webhook-duplicates` | The same signed event delivered 200 times by 50 concurrent clients. Every delivery is acknowledged with `200` and the account is credited exactly once. |
+| `stripe-outage` | Deposits at 5/s while `fake-stripe` is healthy, returns `500` for 20s, then recovers. Deposits must fail fast with `503` once the circuit breaker opens, succeed again after the open state ends, and leave no deposit row without a Stripe session. |
+
+Results on a single development machine (12 CPUs, Docker Desktop on Windows, every container on the same host). They show behaviour and orders of magnitude, not production capacity:
+
+| Scenario | Load | Result |
+|---|---|---|
+| `transfers` | 50 req/s for 60s | 3,000 transfers, 0 unexpected statuses; p95 10 ms, p99 15 ms; hot and spread accounts alike; money conserved |
+| `transfers` | 300 req/s for 60s | 17,991 transfers, 0 unexpected statuses; p95 22 ms on hot accounts vs 12 ms spread, p99 137 ms vs 103 ms; money conserved |
+| `transfers` | 600 req/s offered for 30s | Saturates at about 370 req/s; p95 1.03s and k6 drops the excess, but still 0 unexpected statuses and money conserved |
+| `webhook-duplicates` | 200 deliveries, 50 concurrent | All `200`; balance credited once; p95 201 ms |
+| `stripe-outage` | 5 deposits/s, 60s plus cooldown | Outage phase: 98 of 100 deposits rejected with `503` (the other 2 completed before the failure began), p50 6 ms because the open breaker fails fast; only the first calls paid for the retries (p99 619 ms = 3 attempts with 200/400 ms backoff). After recovery: all `201`, p95 17 ms. No orphan deposits |
+
+What the numbers show: under contention the pessimistic locks serialize the hot accounts without errors or lost updates, and only the tail latency grows. The webhook deduplication holds under a concurrent burst. During a Stripe outage the client stops waiting on a failing dependency within a few calls.
+
 ## Sharing a Snapshot
 
 Create archives from Git so that `.env`, `.git/`, `target/` and IDE metadata are never included:
@@ -327,12 +357,12 @@ git archive --format=zip --output finflow-$(git rev-parse --short HEAD).zip HEAD
 - [x] Testcontainers-based integration tests
 - [x] Stripe deposits: Checkout, exactly-once webhooks, resilience, reconciliation
 - [x] Observability: correlation ids end to end, structured logs, Prometheus metrics
+- [x] Performance and resilience testing (k6 scenarios against a simulated Stripe)
 
 ### Next
 - [ ] Kubernetes
 - [ ] Distributed tracing and alerting
 - [ ] Cloud deployment
-- [ ] Performance and resilience testing
 
 ## Project Goal
 
