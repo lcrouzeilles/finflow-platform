@@ -1,0 +1,31 @@
+# Overlay for the load and resilience tests in perf/. Use it together with
+# the main compose file, from the repository root:
+#
+#   docker compose -f docker-compose.yml -f perf/docker-compose.perf.yml up -d --build
+#
+# It replaces Stripe with WireMock (fake-stripe) and gives the transaction
+# service throwaway credentials, so no real Stripe account or key is needed
+# and nothing leaves the machine. Go back to the normal stack afterwards with
+# `docker compose up -d`.
+#
+# Relative paths resolve against the repository root (the first compose file).
+
+services:
+  fake-stripe:
+    image: wiremock/wiremock:3.13.1
+    container_name: finflow-fake-stripe
+    command: [ "--global-response-templating", "--disable-banner" ]
+    volumes:
+      - ./perf/wiremock:/home/wiremock
+
+  transaction-service:
+    environment:
+      # Not secrets: they only work against fake-stripe and the perf webhooks.
+      STRIPE_SECRET_KEY: sk_test_perf_only
+      STRIPE_WEBHOOK_SECRET: whsec_perf_only
+      STRIPE_API_BASE: http://fake-stripe:8080
+      # Shorter open state so the outage scenario sees the breaker recover.
+      FINFLOW_PAYMENTS_STRIPE_RESILIENCE_WAIT_IN_OPEN: 10s
+    depends_on:
+      fake-stripe:
+        condition: service_started

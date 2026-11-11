@@ -1,0 +1,14 @@
+{
+  "priority": 5,
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/checkout/sessions"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": "{{#assign 'sid'}}cs_test_{{randomValue length=24 type='ALPHANUMERIC'}}{{/assign}}{\"id\": \"{{sid}}\", \"object\": \"checkout.session\", \"mode\": \"payment\", \"status\": \"open\", \"payment_status\": \"unpaid\", \"payment_intent\": null, \"url\": \"http://fake-stripe.local/pay/{{sid}}\"}"
+  }
+}
