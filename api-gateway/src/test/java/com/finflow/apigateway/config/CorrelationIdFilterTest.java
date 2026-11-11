@@ -1,6 +1,7 @@
 package com.finflow.apigateway.config;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 import org.springframework.mock.web.MockFilterChain;
@@ -47,6 +48,18 @@ class CorrelationIdFilterTest {
         assertThat(CorrelationIdFilter.resolve("bad value!")).isNotEqualTo("bad value!");
         assertThat(CorrelationIdFilter.resolve("a".repeat(65))).hasSize(36);
         assertThat(CorrelationIdFilter.resolve("")).hasSize(36);
+    }
+
+    @Test
+    void shouldNotDuplicateTheHeaderEchoedByTheRoutedService() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(CorrelationIdFilter.HEADER, "demo-123");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, (req, res) ->
+                ((HttpServletResponse) res).addHeader(CorrelationIdFilter.HEADER, "demo-123"));
+
+        assertThat(response.getHeaders(CorrelationIdFilter.HEADER)).containsExactly("demo-123");
     }
 
     @Test

@@ -5,6 +5,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponseWrapper;
 import org.slf4j.MDC;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -47,7 +48,7 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
         try {
             filterChain.doFilter(
                     new CorrelationIdRequest(request, correlationId),
-                    response
+                    new CorrelationIdResponse(response)
             );
         } finally {
             MDC.remove(MDC_KEY);
@@ -59,6 +60,31 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
             return incoming;
         }
         return UUID.randomUUID().toString();
+    }
+
+    /**
+     * Keeps the header set by this filter as the only one: the routed
+     * service echoes the same id, and copying it would duplicate the header.
+     */
+    private static final class CorrelationIdResponse extends HttpServletResponseWrapper {
+
+        CorrelationIdResponse(HttpServletResponse response) {
+            super(response);
+        }
+
+        @Override
+        public void setHeader(String name, String value) {
+            if (!HEADER.equalsIgnoreCase(name)) {
+                super.setHeader(name, value);
+            }
+        }
+
+        @Override
+        public void addHeader(String name, String value) {
+            if (!HEADER.equalsIgnoreCase(name)) {
+                super.addHeader(name, value);
+            }
+        }
     }
 
     /** Overrides the correlation header so the routed request carries it. */
