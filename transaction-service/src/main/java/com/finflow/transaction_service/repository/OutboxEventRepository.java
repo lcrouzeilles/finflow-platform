@@ -37,4 +37,13 @@ public interface OutboxEventRepository
     long countByPublishedAtIsNullAndFailedAtIsNull();
 
     long countByFailedAtIsNotNull();
+
+    /** Creation time of the oldest pending event, or {@code null} if none. */
+    @Query("""
+    SELECT MIN(e.createdAt)
+    FROM OutboxEvent e
+    WHERE e.publishedAt IS NULL
+      AND e.failedAt IS NULL
+    """)
+    Instant findOldestPendingCreatedAt();
 }

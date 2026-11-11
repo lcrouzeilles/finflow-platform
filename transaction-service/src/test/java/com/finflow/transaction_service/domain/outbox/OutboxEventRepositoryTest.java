@@ -9,6 +9,7 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 import org.springframework.test.context.ActiveProfiles;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -106,6 +107,19 @@ class OutboxEventRepositoryTest extends AbstractIntegrationTest {
                 .isGreaterThanOrEqualTo(1);
         assertThat(repository.countByPublishedAtIsNullAndFailedAtIsNull())
                 .isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    void shouldFindTheCreationTimeOfTheOldestPendingEvent() {
+        OutboxEvent pending = new OutboxEvent(
+                "TRANSACTION", UUID.randomUUID(), "TRANSFER_COMPLETED", "{}");
+        repository.saveAndFlush(pending);
+
+        // Other tests may have left older pending rows in the shared database,
+        // and PostgreSQL rounds timestamps to microseconds.
+        assertThat(repository.findOldestPendingCreatedAt())
+                .isNotNull()
+                .isBeforeOrEqualTo(pending.getCreatedAt().plus(1, ChronoUnit.MICROS));
     }
 
     @Test

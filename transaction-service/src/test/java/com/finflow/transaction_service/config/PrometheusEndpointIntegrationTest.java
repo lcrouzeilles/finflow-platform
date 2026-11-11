@@ -30,4 +30,13 @@ class PrometheusEndpointIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("jvm_memory_used_bytes")));
     }
+
+    @Test
+    void shouldServeTheOutboxBacklogGauges() throws Exception {
+        mockMvc.perform(get("/actuator/prometheus"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("finflow_outbox_pending ")))
+                .andExpect(content().string(containsString("finflow_outbox_oldest_pending_age_seconds ")))
+                .andExpect(content().string(containsString("finflow_outbox_failed ")));
+    }
 }
