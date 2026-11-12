@@ -27,7 +27,8 @@ import java.util.stream.Collectors;
  * or even updating its status) never aborts the rest of the batch. If an
  * event was delivered to Kafka but its status could not be updated (for
  * example because the lease expired and another worker took it), it will
- * be re-delivered: consumers must deduplicate on {@code eventId}.
+ * be re-delivered: consumers must deduplicate on {@code eventId} (see
+ * {@link com.finflow.transaction_service.event.TransferCompletedHandler}).
  *
  * <p>Each {@code event_type} is handled by one {@link OutboxEventRelay}; an
  * event with no relay is marked failed (and eventually exhausted) rather

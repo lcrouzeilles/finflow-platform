@@ -75,7 +75,7 @@ The project uses a single Git repository with independently deployable Spring Bo
 - Idempotency support (replay returns the original transaction; concurrent duplicates resolved safely)
 - Account-level authorization: the owner is derived from the JWT, never from the request body
 - Transactional outbox with lease-based claiming, exponential backoff, retry limit and metrics
-- Kafka publication of transfer and deposit events
+- Kafka publication of transfer and deposit events, with a consumer that ignores redeliveries
 - Deposits through Stripe Checkout: hosted payment page, idempotent creation, owner-scoped
 - Signature-authenticated Stripe webhooks processed exactly once (dedup and credit in one transaction)
 - Retry, circuit breaker and timeouts around the Stripe client (503 contract when the provider is down)
@@ -255,6 +255,7 @@ Amounts accept at most 15 integer digits and 2 decimals.
 - Failures are retried with exponential backoff (1s, 2s, ... capped at 300s). After `finflow.outbox.max-attempts` (default `10`) failed attempts the event is marked terminally failed (`failed_at`) and stops being retried; it stays in the table for inspection and manual repair.
 - A failure on one event, including a failure to record its status after the lease expired, never aborts the rest of the batch.
 - Delivery is **at least once**: an event delivered to Kafka whose status update fails is delivered again. Consumers must deduplicate on `eventId`; the payload also carries `transactionId` for correlation.
+- The transfer consumer does: it claims `(consumer, eventId)` in `processed_kafka_events` with `INSERT ... ON CONFLICT DO NOTHING` as the first statement of its transaction, so a redelivered event (even one delivered concurrently during a rebalance) is acknowledged without being applied again, and a failed effect rolls the claim back so the retry applies it. Claims older than `finflow.kafka.dedup.retention` (default 14 days, beyond Kafka's default retention) are purged daily.
 - Metrics: the counter `finflow.outbox.events` is tagged with `result=published|failed|exhausted|status_update_failed`; the gauges `finflow.outbox.pending`, `finflow.outbox.oldest.pending.age` and `finflow.outbox.failed` are read from the database on each scrape, so they cover every publisher instance and survive restarts; `finflow.outbox.publish` times each publication by event type.
 
 ## Observability
@@ -508,10 +509,12 @@ roadmap unless required by a new feature or a correctness issue.
     to support deduplication and workflow correlation.
 -   [ ] Introduce event schema versioning and compatibility rules as
     additional event types are added.
--   [ ] Implement idempotent Kafka consumers using durable event
+-   [x] Implement idempotent Kafka consumers using durable event
     deduplication.
 -   [ ] Test duplicate message delivery and relevant out-of-order
-    processing scenarios.
+    processing scenarios. *(Partial: sequential and concurrent
+    duplicates are covered; out-of-order delivery is not, since the
+    only consumer has no order-dependent effect yet.)*
 -   [x] Document the at-least-once delivery guarantee and the
     possibility of duplicate events.
 
