@@ -175,6 +175,23 @@ public class OutboxEvent {
         return failedAt != null;
     }
 
+    /**
+     * Puts an exhausted event back in the queue with a fresh retry budget,
+     * once an operator has fixed the cause. The last error is kept until
+     * the next attempt replaces or clears it.
+     */
+    public void requeue() {
+        if (!isExhausted()) {
+            throw new IllegalStateException(
+                    "Only an exhausted outbox event can be requeued: " + id
+            );
+        }
+        this.failedAt = null;
+        this.attempts = 0;
+        this.nextAttemptAt = null;
+        clearClaim();
+    }
+
     public void claim(String workerId, Instant until) {
         this.claimedBy = workerId;
         this.claimUntil = until;

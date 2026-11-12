@@ -157,6 +157,28 @@ class OutboxEventTest {
     }
 
     @Test
+    void shouldRequeueAnExhaustedEventWithAFreshRetryBudget() {
+        OutboxEvent event = createEvent();
+        event.markFailed("Kafka unavailable", 1);
+
+        event.requeue();
+
+        assertThat(event.isExhausted()).isFalse();
+        assertThat(event.getFailedAt()).isNull();
+        assertThat(event.getAttempts()).isZero();
+        assertThat(event.getNextAttemptAt()).isNull();
+        assertThat(event.getLastError()).isEqualTo("Kafka unavailable");
+    }
+
+    @Test
+    void shouldRejectRequeueingAnEventThatIsNotExhausted() {
+        OutboxEvent event = createEvent();
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(event::requeue)
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void shouldUseCallerSuppliedId() {
         UUID id = UUID.randomUUID();
 

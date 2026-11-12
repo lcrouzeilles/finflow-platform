@@ -253,6 +253,7 @@ Amounts accept at most 15 integer digits and 2 decimals.
 - The transfer, the ledger row and the `outbox_events` row are written in one database transaction.
 - A scheduled publisher claims pending events with `FOR UPDATE SKIP LOCKED` and a lease (`claim_until`), publishes them to Kafka (keyed by `sourceAccountId`, synchronous ack) and marks them published.
 - Failures are retried with exponential backoff (1s, 2s, ... capped at 300s). After `finflow.outbox.max-attempts` (default `10`) failed attempts the event is marked terminally failed (`failed_at`) and stops being retried; it stays in the table for inspection and manual repair.
+- Operators (role `ADMIN`, through the gateway) list the exhausted events with `GET /admin/outbox/failed?limit=50` (oldest failure first, without the payload) and, once the cause is fixed, requeue one with `POST /admin/outbox/{eventId}/retry`: the event gets a fresh retry budget and the publisher picks it up on its next poll. Retrying an event that is pending or published returns `409`; each retry is logged with the operator's subject.
 - A failure on one event, including a failure to record its status after the lease expired, never aborts the rest of the batch.
 - Delivery is **at least once**: an event delivered to Kafka whose status update fails is delivered again. Consumers must deduplicate on `eventId`; the payload also carries `transactionId` for correlation.
 - The transfer consumer does: it claims `(consumer, eventId)` in `processed_kafka_events` with `INSERT ... ON CONFLICT DO NOTHING` as the first statement of its transaction, so a redelivered event (even one delivered concurrently during a rebalance) is acknowledged without being applied again, and a failed effect rolls the claim back so the retry applies it. Claims older than `finflow.kafka.dedup.retention` (default 14 days, beyond Kafka's default retention) are purged daily.
@@ -495,9 +496,9 @@ roadmap unless required by a new feature or a correctness issue.
     events.
 -   [x] Introduce terminal failure handling or a dead-letter mechanism
     for events that exceed the retry limit.
--   [ ] Provide an operational mechanism to inspect, repair, and replay
-    failed events. *(Terminally failed events are kept in
-    `outbox_events` with `failed_at` set; no admin endpoint yet.)*
+-   [x] Provide an operational mechanism to inspect, repair, and replay
+    failed events. *(`GET /admin/outbox/failed` and
+    `POST /admin/outbox/{eventId}/retry`, admin only.)*
 -   [x] Add monitoring for pending events, retry counts, publication
     failures, and event processing delays.
 -   [ ] Expand failure-recovery tests to cover process crashes, Kafka

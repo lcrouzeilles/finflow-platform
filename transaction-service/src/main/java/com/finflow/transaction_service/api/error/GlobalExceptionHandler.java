@@ -4,6 +4,8 @@ import com.finflow.transaction_service.exception.AccountNotFoundException;
 import com.finflow.transaction_service.exception.IdempotencyKeyConflictException;
 import com.finflow.transaction_service.exception.InsufficientFundsException;
 import com.finflow.transaction_service.exception.InvalidTransferException;
+import com.finflow.transaction_service.exception.OutboxEventNotFoundException;
+import com.finflow.transaction_service.exception.OutboxEventNotRetryableException;
 import com.finflow.transaction_service.exception.OwnerNotFoundException;
 import com.finflow.transaction_service.payment.service.DepositNotFoundException;
 import com.finflow.transaction_service.payment.service.InvalidDepositException;
@@ -278,6 +280,22 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 safeMessage(exception, "Invalid request"),
                 request
         );
+    }
+
+    @ExceptionHandler(OutboxEventNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleOutboxEventNotFoundException(
+            OutboxEventNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        return respond(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(OutboxEventNotRetryableException.class)
+    public ResponseEntity<ApiErrorResponse> handleOutboxEventNotRetryableException(
+            OutboxEventNotRetryableException exception,
+            HttpServletRequest request
+    ) {
+        return respond(HttpStatus.CONFLICT, exception.getMessage(), request);
     }
 
     @ExceptionHandler(IdempotencyKeyConflictException.class)

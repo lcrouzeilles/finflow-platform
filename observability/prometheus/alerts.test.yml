@@ -89,7 +89,9 @@ tests:
               summary: 2 outbox events exhausted their retries
               description: >-
                 These events will not be published again on their own and need
-                an operator (outbox_events.failed_at is set).
+                an operator: list them with GET /admin/outbox/failed and, once
+                the cause is fixed, requeue each with
+                POST /admin/outbox/{eventId}/retry.
 
   # 600 requests a minute, 10% of them 503; actuator requests do not count.
   - interval: 1m

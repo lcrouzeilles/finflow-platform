@@ -1,6 +1,7 @@
 package com.finflow.transaction_service.repository;
 
 import com.finflow.transaction_service.domain.outbox.OutboxEvent;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -37,6 +38,9 @@ public interface OutboxEventRepository
     long countByPublishedAtIsNullAndFailedAtIsNull();
 
     long countByFailedAtIsNotNull();
+
+    /** Exhausted events, oldest failure first. */
+    List<OutboxEvent> findByFailedAtIsNotNullOrderByFailedAtAsc(Limit limit);
 
     /** Creation time of the oldest pending event, or {@code null} if none. */
     @Query("""
