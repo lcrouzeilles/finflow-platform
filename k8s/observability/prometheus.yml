@@ -1,6 +1,7 @@
 # Kubernetes variant of observability/prometheus/prometheus.yml: every
-# transaction-service pod is scraped on its own (pod discovery), so per-pod
-# counters are not mixed behind the Service. The alert rules are shared.
+# transaction-service and api-gateway pod is scraped on its own (pod
+# discovery), so per-pod counters are not mixed behind the Service. The alert
+# rules are shared.
 global:
   scrape_interval: 10s
   evaluation_interval: 10s
@@ -22,6 +23,27 @@ scrape_configs:
     relabel_configs:
       - source_labels: [ __meta_kubernetes_pod_label_app_kubernetes_io_name ]
         regex: transaction-service
+        action: keep
+      - source_labels: [ __meta_kubernetes_pod_annotation_prometheus_io_scrape ]
+        regex: "true"
+        action: keep
+      - source_labels: [ __meta_kubernetes_pod_annotation_prometheus_io_path ]
+        target_label: __metrics_path__
+      - source_labels: [ __meta_kubernetes_pod_ip, __meta_kubernetes_pod_annotation_prometheus_io_port ]
+        regex: (.+);(.+)
+        replacement: $1:$2
+        target_label: __address__
+      - source_labels: [ __meta_kubernetes_pod_name ]
+        target_label: pod
+
+  - job_name: api-gateway
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          own_namespace: true
+    relabel_configs:
+      - source_labels: [ __meta_kubernetes_pod_label_app_kubernetes_io_name ]
+        regex: api-gateway
         action: keep
       - source_labels: [ __meta_kubernetes_pod_annotation_prometheus_io_scrape ]
         regex: "true"

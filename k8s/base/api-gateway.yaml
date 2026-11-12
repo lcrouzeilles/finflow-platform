@@ -20,6 +20,10 @@ spec:
       labels:
         app.kubernetes.io/name: api-gateway
         app.kubernetes.io/part-of: finflow
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /actuator/prometheus
+        prometheus.io/port: "9091"
     spec:
       enableServiceLinks: false
       securityContext:
@@ -35,6 +39,9 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            # Actuator (probes, metrics); the Service does not expose it.
+            - name: management
+              containerPort: 9091
           env:
             # Routes to http://transaction-service:8080 and Keycloak's JWKS at
             # http://keycloak:8080, as in Docker Compose.
@@ -52,15 +59,15 @@ spec:
             limits:
               memory: 512Mi
           startupProbe:
-            httpGet: { path: /actuator/health/liveness, port: http }
+            httpGet: { path: /actuator/health/liveness, port: management }
             periodSeconds: 5
             failureThreshold: 36
           livenessProbe:
-            httpGet: { path: /actuator/health/liveness, port: http }
+            httpGet: { path: /actuator/health/liveness, port: management }
             periodSeconds: 10
             failureThreshold: 3
           readinessProbe:
-            httpGet: { path: /actuator/health/readiness, port: http }
+            httpGet: { path: /actuator/health/readiness, port: management }
             periodSeconds: 5
             failureThreshold: 3
           securityContext:

@@ -17,3 +17,10 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: [ "transaction-service:8080" ]
+
+  # The gateway serves its actuator on the management port, which Docker
+  # Compose does not publish.
+  - job_name: api-gateway
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: [ "api-gateway:9091" ]

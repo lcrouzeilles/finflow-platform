@@ -97,7 +97,7 @@ Docker Compose runs the whole platform on one host; see [Kubernetes](#kubernetes
 
 | Service | Host Port | Container Port |
 |---|---:|---:|
-| API Gateway | `${GATEWAY_PORT}` (default `8080`) | `8080` |
+| API Gateway | `${GATEWAY_PORT}` (default `8080`) | `8080`, `9091` (actuator, not published) |
 | Keycloak | `8081` | `8080` |
 | PostgreSQL | `55433` | `5432` |
 | Redis | `6379` | `6379` |
@@ -180,7 +180,7 @@ The same platform runs on Docker Desktop's built-in Kubernetes (Settings → Kub
 |---|---|
 | `k8s/base` | The gateway and the transaction service: probes on the actuator health groups, resource requests and memory limits, `restricted` pod security (non-root UID 10001, read-only root filesystem, no capabilities, `RuntimeDefault` seccomp), rolling updates with no unavailable pod, two service replicas and a PodDisruptionBudget |
 | `k8s/infra` | Development stand-ins for PostgreSQL, Redis, Kafka (single KRaft node) and Keycloak; managed services replace them in the cloud |
-| `k8s/observability` | Tempo, Prometheus (discovers every service pod, shares the alert rules with Compose), Alertmanager with its `alert-log` sink, and Grafana |
+| `k8s/observability` | Tempo, Prometheus (discovers every service and gateway pod, shares the alert rules with Compose), Alertmanager with its `alert-log` sink, and Grafana |
 | `k8s/overlays/local` | Everything in the `finflow` namespace; the gateway and Keycloak published on `localhost:8180` and `localhost:8181`, so the Compose stack can keep running |
 | `k8s/overlays/perf` | The local overlay with WireMock in place of Stripe, for the k6 scenarios |
 
@@ -293,11 +293,12 @@ Open Grafana → Explore → Tempo and search by service, or paste a `traceId` f
 docker compose exec transaction-service curl -s localhost:8080/actuator/prometheus | grep finflow_outbox
 ```
 
-**Alerts.** Prometheus scrapes the service every 10s and evaluates [`observability/prometheus/alerts.yml`](observability/prometheus/alerts.yml):
+**Alerts.** Prometheus scrapes the service and the gateway every 10s and evaluates [`observability/prometheus/alerts.yml`](observability/prometheus/alerts.yml):
 
 | Alert | Fires when | Severity |
 |---|---|---|
 | `TransactionServiceDown` | the service cannot be scraped for 1 minute | critical |
+| `ApiGatewayDown` | the gateway cannot be scraped for 1 minute | critical |
 | `StripeCircuitBreakerOpen` | a Stripe circuit breaker was open at any point in the last minute | critical |
 | `OutboxNotDraining` | the oldest pending outbox event is older than 2 minutes, for 1 minute | critical |
 | `OutboxEventsExhausted` | any outbox event exhausted its retries and needs an operator | warning |
@@ -314,7 +315,9 @@ Firing alerts show up in Prometheus (`/alerts`) and on the dashboard, and Promet
 
 During the `stripe-outage` scenario (see [Performance and Resilience Testing](#performance-and-resilience-testing)) `StripeCircuitBreakerOpen` fired about 15 seconds after the outage began, and `HighServerErrorRate` and `HighLatency` went pending while their 5-minute windows were not met.
 
-**Dashboard.** Grafana (`http://localhost:3000`, anonymous admin, bound to localhost) is provisioned with Prometheus and Tempo data sources and the *FinFlow transaction service* dashboard: firing alerts, circuit breaker states, outbox backlog, request rate by status, 5xx ratio, p95 latency per endpoint, Stripe calls and outbox publication results.
+**Dashboard.** Grafana (`http://localhost:3000`, anonymous admin, bound to localhost) is provisioned with Prometheus and Tempo data sources and the *FinFlow transaction service* dashboard: firing alerts, circuit breaker states, outbox backlog, request rate by status, 5xx ratio, p95 latency per endpoint, Stripe calls, outbox publication results, and the gateway's request rate and end-to-end p95.
+
+**Gateway metrics.** The gateway's port is public, so in containers its actuator (probes and `/actuator/prometheus`) listens on a separate management port, `9091`, which Docker Compose does not publish and the Kubernetes Service does not expose; the probes use it too.
 
 ## Payments
 

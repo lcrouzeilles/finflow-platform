@@ -23,6 +23,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Liveness and readiness probes come without a token.
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        // Scraped by Prometheus without a token. In containers the
+                        // actuator listens on the unpublished management port only.
+                        .requestMatchers(HttpMethod.GET, "/actuator/prometheus").permitAll()
                         // Stripe webhooks carry a signature, not a JWT; the
                         // transaction service verifies it.
                         .requestMatchers(HttpMethod.POST, "/webhooks/stripe").permitAll()

@@ -115,7 +115,7 @@
       "gridPos": { "x": 0, "y": 6, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
-        { "refId": "A", "expr": "sum by (status) (rate(http_server_requests_seconds_count{uri!~\"/actuator.*\"}[1m]))", "legendFormat": "{{status}}" }
+        { "refId": "A", "expr": "sum by (status) (rate(http_server_requests_seconds_count{job=\"transaction-service\",uri!~\"/actuator.*\"}[1m]))", "legendFormat": "{{status}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
     },
@@ -128,7 +128,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(http_server_requests_seconds_count{uri!~\"/actuator.*\",status=~\"5..\"}[1m])) / sum(rate(http_server_requests_seconds_count{uri!~\"/actuator.*\"}[1m]))",
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"transaction-service\",uri!~\"/actuator.*\",status=~\"5..\"}[1m])) / sum(rate(http_server_requests_seconds_count{job=\"transaction-service\",uri!~\"/actuator.*\"}[1m]))",
           "legendFormat": "5xx"
         }
       ],
@@ -150,7 +150,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le, method, uri) (rate(http_server_requests_seconds_bucket{uri!~\"/actuator.*\"}[1m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, method, uri) (rate(http_server_requests_seconds_bucket{job=\"transaction-service\",uri!~\"/actuator.*\"}[1m])))",
           "legendFormat": "{{method}} {{uri}}"
         }
       ],
@@ -197,6 +197,28 @@
         { "refId": "B", "expr": "finflow_outbox_oldest_pending_age_seconds", "legendFormat": "oldest pending (s)" }
       ],
       "fieldConfig": { "defaults": { "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Gateway requests per second by status",
+      "gridPos": { "x": 0, "y": 30, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (status) (rate(http_server_requests_seconds_count{job=\"api-gateway\",uri!~\"/actuator.*\"}[1m]))", "legendFormat": "{{status}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Gateway latency p95 (end to end)",
+      "gridPos": { "x": 12, "y": 30, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"api-gateway\",uri!~\"/actuator.*\"}[1m])))", "legendFormat": "p95" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
     }
   ]
 }

@@ -1,6 +1,7 @@
-# Alert rules for the transaction service. Prometheus evaluates them and
-# shows them under /alerts (and Grafana through the ALERTS series); routing
-# to a pager or chat would be Alertmanager's job, which this stack omits.
+# Alert rules for the transaction service and the gateway. Prometheus
+# evaluates them, shows them under /alerts (and Grafana through the ALERTS
+# series) and sends them to Alertmanager, which routes them by severity
+# (observability/alertmanager/alertmanager.yml).
 # Unit tests: alerts.test.yml (promtool test rules).
 groups:
   - name: finflow-transaction-service
@@ -13,6 +14,16 @@ groups:
         annotations:
           summary: transaction-service cannot be scraped
           description: Prometheus has not reached /actuator/prometheus for over a minute.
+
+      # Every request enters through the gateway: if it is down, the API is.
+      - alert: ApiGatewayDown
+        expr: up{job="api-gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: api-gateway cannot be scraped
+          description: Prometheus has not reached the gateway's /actuator/prometheus for over a minute.
 
       # max_over_time keeps the alert up for a minute after the breaker
       # leaves the open state, so a short open/half-open cycle between

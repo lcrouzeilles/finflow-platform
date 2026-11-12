@@ -24,6 +24,25 @@ tests:
               summary: transaction-service cannot be scraped
               description: Prometheus has not reached /actuator/prometheus for over a minute.
 
+  - interval: 10s
+    input_series:
+      - series: 'up{job="api-gateway",instance="api-gateway:9091"}'
+        values: '1 1 0x12'
+    alert_rule_test:
+      - eval_time: 40s
+        alertname: ApiGatewayDown
+        exp_alerts: []
+      - eval_time: 90s
+        alertname: ApiGatewayDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: api-gateway
+              instance: api-gateway:9091
+            exp_annotations:
+              summary: api-gateway cannot be scraped
+              description: Prometheus has not reached the gateway's /actuator/prometheus for over a minute.
+
   # Open from 20s to 30s only: fires at once and stays up for a minute.
   - interval: 10s
     input_series:
