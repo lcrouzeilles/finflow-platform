@@ -285,6 +285,8 @@ gateway  http post /transfers/**
          └─ finflow.transfer.completed process  (Kafka listener)
 ```
 
+Inside the service, database and Stripe work shows up too. Every JDBC connection and query is a span (`datasource-micrometer`; parameter values are never recorded, result-set fetches are left out), and the `connection` span starts when the pool is asked for a connection, so waiting for one is visible. Each Stripe call is a `stripe <operation>` span with one `stripe attempt` child per HTTP attempt: retries appear as siblings, and a call rejected by the open circuit has no attempt at all.
+
 Open Grafana → Explore → Tempo and search by service, or paste a `traceId` from a log line.
 
 **Metrics.** `/actuator/prometheus` exposes the Micrometer registry in Prometheus format: the outbox counters and backlog gauges, the Stripe circuit breaker and retry metrics (`resilience4j_*`), the reconciliation discrepancy counter, plus JVM, HTTP (with histogram buckets, for percentiles), Kafka and connection-pool metrics. It needs no token so a scraper can reach it, which is safe here because the gateway does not route `/actuator/**` and Docker Compose does not publish the transaction service's port. `/actuator/metrics` still requires a JWT.
@@ -555,9 +557,8 @@ roadmap unless required by a new feature or a correctness issue.
     Stripe retry/circuit breaker and reconciliation counters, exported to
     Prometheus; no transfer or consumer-specific metrics yet.)*
 -   [x] Add distributed tracing across the API gateway, transaction
-    service, and asynchronous workflows. *(Database and Stripe calls are
-    not traced yet: a JDBC or HTTP-client instrumentation would show
-    where time goes inside a request.)*
+    service, and asynchronous workflows, including JDBC and Stripe
+    calls.
 -   [x] Define alerts for stuck outbox events and repeated publication
     failures.
 

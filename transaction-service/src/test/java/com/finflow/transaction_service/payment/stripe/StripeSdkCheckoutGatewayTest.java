@@ -10,6 +10,9 @@ import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.RetryRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationHandler;
+import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -19,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -35,6 +39,7 @@ class StripeSdkCheckoutGatewayTest {
     private CircuitBreakerRegistry circuitBreakers;
     private StripeSdkCheckoutGateway gateway;
     private SimpleMeterRegistry meterRegistry;
+    private final List<Observation.Context> observations = new CopyOnWriteArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -64,11 +69,25 @@ class StripeSdkCheckoutGatewayTest {
         circuitBreakers = config.stripeCircuitBreakerRegistry(properties, meterRegistry);
         RetryRegistry retries = config.stripeRetryRegistry(properties, meterRegistry);
 
+        ObservationRegistry observationRegistry = ObservationRegistry.create();
+        observationRegistry.observationConfig().observationHandler(new ObservationHandler<>() {
+            @Override
+            public boolean supportsContext(Observation.Context context) {
+                return true;
+            }
+
+            @Override
+            public void onStop(Observation.Context context) {
+                observations.add(context);
+            }
+        });
+
         gateway = new StripeSdkCheckoutGateway(
                 new StripeClient(transport),
                 properties,
                 circuitBreakers,
-                retries
+                retries,
+                observationRegistry
         );
     }
 
@@ -243,6 +262,52 @@ class StripeSdkCheckoutGatewayTest {
         assertThat(circuitBreakers.circuitBreaker(StripeSdkCheckoutGateway.RECONCILIATION_POLICY).getState())
                 .isEqualTo(CircuitBreaker.State.OPEN);
         assertThat(breaker().getState()).isEqualTo(CircuitBreaker.State.CLOSED);
+    }
+
+    @Test
+    void shouldTraceACallWithOneChildPerAttempt() {
+        transport.failWith(() -> new ApiConnectionException("connection reset"));
+
+        assertThatThrownBy(() -> gateway.createCheckoutSession(command()))
+                .isInstanceOf(PaymentProviderUnavailableException.class);
+
+        Observation.Context call = single(StripeSdkCheckoutGateway.OBSERVATION_CALL);
+        assertThat(call.getContextualName()).isEqualTo("stripe checkout.sessions.create");
+        assertThat(call.getLowCardinalityKeyValue("policy").getValue())
+                .isEqualTo(StripeSdkCheckoutGateway.CHECKOUT_POLICY);
+        assertThat(call.getError()).isInstanceOf(PaymentProviderUnavailableException.class);
+
+        List<Observation.Context> attempts = named(StripeSdkCheckoutGateway.OBSERVATION_ATTEMPT);
+        assertThat(attempts).hasSize(MAX_ATTEMPTS);
+        assertThat(attempts).allSatisfy(attempt -> {
+            assertThat(attempt.getParentObservation().getContextView().getName())
+                    .isEqualTo(StripeSdkCheckoutGateway.OBSERVATION_CALL);
+            assertThat(attempt.getError()).isInstanceOf(PaymentProviderException.class);
+        });
+    }
+
+    @Test
+    void shouldTraceACallRejectedByTheOpenCircuitWithoutAttempts() {
+        breaker().transitionToOpenState();
+
+        assertThatThrownBy(() -> gateway.createCheckoutSession(command()))
+                .isInstanceOf(PaymentProviderUnavailableException.class);
+
+        assertThat(single(StripeSdkCheckoutGateway.OBSERVATION_CALL).getError())
+                .isInstanceOf(PaymentProviderUnavailableException.class);
+        assertThat(named(StripeSdkCheckoutGateway.OBSERVATION_ATTEMPT)).isEmpty();
+    }
+
+    private List<Observation.Context> named(String name) {
+        return observations.stream()
+                .filter(context -> name.equals(context.getName()))
+                .toList();
+    }
+
+    private Observation.Context single(String name) {
+        List<Observation.Context> matching = named(name);
+        assertThat(matching).hasSize(1);
+        return matching.get(0);
     }
 
     private CircuitBreaker breaker() {

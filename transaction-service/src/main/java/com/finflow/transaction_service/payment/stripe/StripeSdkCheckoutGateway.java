@@ -12,6 +12,8 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.core.functions.CheckedSupplier;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryRegistry;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -59,21 +61,29 @@ public class StripeSdkCheckoutGateway implements StripeCheckoutGateway {
     /** Breaker and retry instance for the reconciliation job. */
     public static final String RECONCILIATION_POLICY = "stripe-reconciliation";
 
+    /** One logical call, including its retries and breaker rejections. */
+    static final String OBSERVATION_CALL = "finflow.stripe.call";
+    /** One HTTP attempt to Stripe, a child of the call. */
+    static final String OBSERVATION_ATTEMPT = "finflow.stripe.attempt";
+
     private final StripeClient client;
     private final StripeProperties properties;
     private final CircuitBreaker checkoutBreaker;
     private final Retry checkoutRetry;
     private final CircuitBreaker reconciliationBreaker;
     private final Retry reconciliationRetry;
+    private final ObservationRegistry observationRegistry;
 
     public StripeSdkCheckoutGateway(
             StripeClient client,
             StripeProperties properties,
             CircuitBreakerRegistry circuitBreakerRegistry,
-            RetryRegistry retryRegistry
+            RetryRegistry retryRegistry,
+            ObservationRegistry observationRegistry
     ) {
         this.client = client;
         this.properties = properties;
+        this.observationRegistry = observationRegistry;
         this.checkoutBreaker = circuitBreakerRegistry.circuitBreaker(CHECKOUT_POLICY);
         this.checkoutRetry = retryRegistry.retry(CHECKOUT_POLICY);
         this.reconciliationBreaker = circuitBreakerRegistry.circuitBreaker(RECONCILIATION_POLICY);
@@ -113,6 +123,7 @@ public class StripeSdkCheckoutGateway implements StripeCheckoutGateway {
                 .build();
 
         Session session = resilient(
+                "checkout.sessions.create",
                 checkoutBreaker,
                 checkoutRetry,
                 () -> client.v1().checkout().sessions().create(params, options)
@@ -137,7 +148,7 @@ public class StripeSdkCheckoutGateway implements StripeCheckoutGateway {
                 .setLimit(LIST_PAGE_SIZE)
                 .build();
 
-        return resilient(reconciliationBreaker, reconciliationRetry, () -> {
+        return resilient("checkout.sessions.list", reconciliationBreaker, reconciliationRetry, () -> {
             List<ProviderCheckoutSession> sessions = new ArrayList<>();
 
             for (Session session : client.v1().checkout().sessions().list(params).autoPagingIterable()) {
@@ -152,6 +163,7 @@ public class StripeSdkCheckoutGateway implements StripeCheckoutGateway {
     public Optional<ProviderCheckoutSession> findCheckoutSession(String sessionId) {
         try {
             Session session = resilient(
+                    "checkout.sessions.retrieve",
                     reconciliationBreaker,
                     reconciliationRetry,
                     () -> client.v1().checkout().sessions().retrieve(sessionId)
@@ -182,15 +194,32 @@ public class StripeSdkCheckoutGateway implements StripeCheckoutGateway {
      * Runs one SDK call as Retry(CircuitBreaker(call)): every attempt is
      * recorded by the breaker, and once it is open the retry stops because
      * {@link CallNotPermittedException} is not retryable.
+     *
+     * <p>Traced as a {@value #OBSERVATION_CALL} span with one
+     * {@value #OBSERVATION_ATTEMPT} child per HTTP attempt, so a slow
+     * request shows how long Stripe took, how many retries it needed and
+     * whether the breaker rejected it without calling Stripe at all.
      */
-    <T> T resilient(CircuitBreaker breaker, Retry retry, StripeCall<T> call) {
-        CheckedSupplier<T> translated = () -> {
-            try {
-                return call.execute();
-            } catch (StripeException exception) {
-                throw StripeExceptions.translate(exception);
-            }
-        };
+    <T> T resilient(String operation, CircuitBreaker breaker, Retry retry, StripeCall<T> call) {
+        return Observation.createNotStarted(OBSERVATION_CALL, observationRegistry)
+                .contextualName("stripe " + operation)
+                .lowCardinalityKeyValue("operation", operation)
+                .lowCardinalityKeyValue("policy", breaker.getName())
+                .observe(() -> resilientCall(operation, breaker, retry, call));
+    }
+
+    private <T> T resilientCall(String operation, CircuitBreaker breaker, Retry retry, StripeCall<T> call) {
+        CheckedSupplier<T> translated = () -> Observation
+                .createNotStarted(OBSERVATION_ATTEMPT, observationRegistry)
+                .contextualName("stripe attempt")
+                .lowCardinalityKeyValue("operation", operation)
+                .observe(() -> {
+                    try {
+                        return call.execute();
+                    } catch (StripeException exception) {
+                        throw StripeExceptions.translate(exception);
+                    }
+                });
 
         CheckedSupplier<T> decorated = Retry.decorateCheckedSupplier(
                 retry,

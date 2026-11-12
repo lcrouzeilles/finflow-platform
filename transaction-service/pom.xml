@@ -29,6 +29,7 @@
 	<properties>
 		<java.version>21</java.version>
 		<resilience4j.version>2.4.0</resilience4j.version>
+		<datasource-micrometer.version>2.3.0</datasource-micrometer.version>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<user.timezone>UTC</user.timezone>
@@ -136,6 +137,12 @@
 		<dependency>
 			<groupId>io.opentelemetry</groupId>
 			<artifactId>opentelemetry-exporter-otlp</artifactId>
+		</dependency>
+		<!-- JDBC spans: connection acquisition (Hikari wait) and each query. -->
+		<dependency>
+			<groupId>net.ttddyy.observation</groupId>
+			<artifactId>datasource-micrometer-spring-boot</artifactId>
+			<version>${datasource-micrometer.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
