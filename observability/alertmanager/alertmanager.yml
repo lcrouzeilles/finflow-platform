@@ -1,0 +1,26 @@
+# Routes the alerts that Prometheus fires (observability/prometheus/alerts.yml).
+# Critical alerts page the on-call engineer and repeat hourly; warnings go to
+# the team channel. Locally both receivers are webhooks to alert-log, an echo
+# server that prints each notification (docker logs finflow-alert-log). In a
+# real deployment they become pagerduty_configs / slack_configs, with the
+# credentials read from files (routing_key_file, api_url_file), not inlined.
+route:
+  receiver: team-channel
+  group_by: [ alertname ]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 4h
+  routes:
+    - matchers: [ severity="critical" ]
+      receiver: on-call
+      repeat_interval: 1h
+
+receivers:
+  - name: on-call
+    webhook_configs:
+      - url: http://alert-log:8080/on-call
+        send_resolved: true
+  - name: team-channel
+    webhook_configs:
+      - url: http://alert-log:8080/team-channel
+        send_resolved: true

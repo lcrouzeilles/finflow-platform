@@ -38,7 +38,7 @@ finflow-transaction-platform/
 ├── api-gateway/
 ├── transaction-service/
 ├── keycloak/
-├── observability/        (Tempo, Prometheus + alert rules, Grafana provisioning)
+├── observability/        (Tempo, Prometheus + alert rules, Alertmanager routes, Grafana provisioning)
 ├── perf/                 (k6 load and resilience scenarios)
 ├── k8s/                  (Kustomize manifests and deploy script for a local cluster)
 ├── docker-compose.yml
@@ -105,6 +105,8 @@ Docker Compose runs the whole platform on one host; see [Kubernetes](#kubernetes
 | Transaction Service | — | `8080` |
 | Grafana (localhost only) | `${GRAFANA_PORT}` (default `3000`) | `3000` |
 | Prometheus (localhost only) | `${PROMETHEUS_PORT}` (default `9090`) | `9090` |
+| Alertmanager (localhost only) | `${ALERTMANAGER_PORT}` (default `9093`) | `9093` |
+| alert-log (notification sink) | — | `8080` |
 | Tempo | — | `3200`, `4318` (OTLP/HTTP) |
 
 The Transaction Service is accessible internally through:
@@ -127,7 +129,7 @@ cp .env.example .env
 | `KC_BOOTSTRAP_ADMIN_USERNAME`, `KC_BOOTSTRAP_ADMIN_PASSWORD` | Keycloak admin console |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Transaction Service (Stripe test mode: `sk_test_...` and `whsec_...`) |
 | `GATEWAY_PORT` | Host port of the API Gateway (default `8080`); change it if that port is taken. Stripe Checkout redirects follow it |
-| `GRAFANA_PORT`, `PROMETHEUS_PORT` | Host ports of Grafana (default `3000`) and Prometheus (default `9090`), bound to `127.0.0.1` |
+| `GRAFANA_PORT`, `PROMETHEUS_PORT`, `ALERTMANAGER_PORT` | Host ports of Grafana (default `3000`), Prometheus (default `9090`) and Alertmanager (default `9093`), bound to `127.0.0.1` |
 
 `keycloak/finflow-realm.json` is imported on the first start of Keycloak and contains only generic demo identities, no real users:
 
@@ -178,7 +180,7 @@ The same platform runs on Docker Desktop's built-in Kubernetes (Settings → Kub
 |---|---|
 | `k8s/base` | The gateway and the transaction service: probes on the actuator health groups, resource requests and memory limits, `restricted` pod security (non-root UID 10001, read-only root filesystem, no capabilities, `RuntimeDefault` seccomp), rolling updates with no unavailable pod, two service replicas and a PodDisruptionBudget |
 | `k8s/infra` | Development stand-ins for PostgreSQL, Redis, Kafka (single KRaft node) and Keycloak; managed services replace them in the cloud |
-| `k8s/observability` | Tempo, Prometheus (discovers every service pod, shares the alert rules with Compose) and Grafana |
+| `k8s/observability` | Tempo, Prometheus (discovers every service pod, shares the alert rules with Compose), Alertmanager with its `alert-log` sink, and Grafana |
 | `k8s/overlays/local` | Everything in the `finflow` namespace; the gateway and Keycloak published on `localhost:8180` and `localhost:8181`, so the Compose stack can keep running |
 | `k8s/overlays/perf` | The local overlay with WireMock in place of Stripe, for the k6 scenarios |
 
@@ -186,6 +188,8 @@ The same platform runs on Docker Desktop's built-in Kubernetes (Settings → Kub
 k8s/deploy.sh                 # build images, create the Secret and ConfigMaps, apply, wait for every rollout
 kubectl --context docker-desktop -n finflow get pods
 kubectl --context docker-desktop -n finflow port-forward svc/grafana 3000:3000
+kubectl --context docker-desktop -n finflow port-forward svc/alertmanager 9093:9093
+kubectl --context docker-desktop -n finflow logs deployment/alert-log   # notifications sent
 kubectl --context docker-desktop delete namespace finflow   # remove everything
 ```
 
@@ -306,7 +310,9 @@ The rules have unit tests ([`alerts.test.yml`](observability/prometheus/alerts.t
 docker run --rm --entrypoint promtool -v "$PWD/observability/prometheus:/rules" -w /rules prom/prometheus:v3.5.0 test rules alerts.test.yml
 ```
 
-Firing alerts show up in Prometheus (`/alerts`) and on the dashboard. Delivering them to a pager or chat is Alertmanager's job, which this local stack leaves out. During the `stripe-outage` scenario (see [Performance and Resilience Testing](#performance-and-resilience-testing)) `StripeCircuitBreakerOpen` fired about 15 seconds after the outage began, and `HighServerErrorRate` and `HighLatency` went pending while their 5-minute windows were not met.
+Firing alerts show up in Prometheus (`/alerts`) and on the dashboard, and Prometheus sends them to Alertmanager ([`observability/alertmanager/alertmanager.yml`](observability/alertmanager/alertmanager.yml)). It groups them by alert name and routes them by severity: `critical` goes to the `on-call` receiver and repeats every hour, everything else to `team-channel` every 4 hours, with a notification when they resolve. Locally both receivers are webhooks to `alert-log`, an echo server that prints each notification (`docker logs finflow-alert-log`); in a real deployment they become PagerDuty and Slack receivers with credentials read from files. CI checks the configuration and the routing with `amtool`. Stopping `transaction-service` delivered `TransactionServiceDown` to `on-call` about 90 seconds later (one minute of `for` plus scrape and group wait), and the resolved notification about 50 seconds after it came back.
+
+During the `stripe-outage` scenario (see [Performance and Resilience Testing](#performance-and-resilience-testing)) `StripeCircuitBreakerOpen` fired about 15 seconds after the outage began, and `HighServerErrorRate` and `HighLatency` went pending while their 5-minute windows were not met.
 
 **Dashboard.** Grafana (`http://localhost:3000`, anonymous admin, bound to localhost) is provisioned with Prometheus and Tempo data sources and the *FinFlow transaction service* dashboard: firing alerts, circuit breaker states, outbox backlog, request rate by status, 5xx ratio, p95 latency per endpoint, Stripe calls and outbox publication results.
 

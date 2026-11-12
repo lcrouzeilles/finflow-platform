@@ -115,6 +115,24 @@ services:
       - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./observability/prometheus:/etc/prometheus:ro
+    depends_on:
+      - alertmanager
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    container_name: finflow-alertmanager
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./observability/alertmanager:/etc/alertmanager:ro
+    depends_on:
+      - alert-log
+  # Stands in for a pager and a chat channel: prints every notification
+  # Alertmanager sends (docker logs finflow-alert-log).
+  alert-log:
+    image: mendhak/http-https-echo:36
+    container_name: finflow-alert-log
+    environment:
+      LOG_IGNORE_PATH: /health
   grafana:
     image: grafana/grafana:12.1.1
     container_name: finflow-grafana

@@ -11,7 +11,7 @@
 # Besides the overlay, it creates what must not or cannot live in it:
 #   - the finflow-secrets Secret, from .env (never committed)
 #   - ConfigMaps from files shared with Docker Compose (Keycloak realm,
-#     Tempo config, alert rules, Grafana provisioning), which kustomize
+#     Tempo config, alert rules, Alertmanager routes, Grafana provisioning), which kustomize
 #     cannot read from outside its directory.
 set -euo pipefail
 
@@ -75,6 +75,7 @@ configmap() {
 configmap keycloak-realm --from-file=keycloak/finflow-realm.json
 configmap tempo-config --from-file=observability/tempo/tempo.yaml
 configmap prometheus-rules --from-file=observability/prometheus/alerts.yml
+configmap alertmanager-config --from-file=observability/alertmanager/alertmanager.yml
 configmap grafana-datasources --from-file=observability/grafana/provisioning/datasources/datasources.yaml
 configmap grafana-dashboards \
   --from-file=observability/grafana/provisioning/dashboards/dashboards.yaml \
@@ -97,7 +98,8 @@ if [ "$redeploy" = 1 ]; then
 fi
 
 for workload in statefulset/postgres statefulset/kafka deployment/redis deployment/keycloak \
-                deployment/tempo deployment/prometheus deployment/grafana \
+                deployment/tempo deployment/prometheus deployment/alertmanager \
+                deployment/alert-log deployment/grafana \
                 deployment/transaction-service deployment/api-gateway; do
   k -n "$namespace" rollout status "$workload" --timeout=5m
 done
@@ -112,4 +114,6 @@ FinFlow is running in namespace $namespace (overlay $overlay):
   Keycloak     http://localhost:8181  (tokens for the gateway come from here)
   Grafana      kubectl --context $context -n $namespace port-forward svc/grafana 3000:3000
   Prometheus   kubectl --context $context -n $namespace port-forward svc/prometheus 9090:9090
+  Alertmanager kubectl --context $context -n $namespace port-forward svc/alertmanager 9093:9093
+  Alerts sent  kubectl --context $context -n $namespace logs deployment/alert-log
 EOF

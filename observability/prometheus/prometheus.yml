@@ -5,6 +5,11 @@ global:
 rule_files:
   - /etc/prometheus/alerts.yml
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: [ "alertmanager:9093" ]
+
 scrape_configs:
   # /actuator/prometheus is open on the internal network only; the gateway
   # does not route /actuator/** and the service port is not published.

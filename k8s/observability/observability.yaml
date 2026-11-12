@@ -1,4 +1,4 @@
-# Tempo, Prometheus and Grafana for the local cluster. Their configuration
+# Tempo, Prometheus, Alertmanager and Grafana for the local cluster. Their configuration
 # lives in ConfigMaps that k8s/deploy.sh creates from observability/ (shared
 # with Docker Compose) and k8s/observability/prometheus.yml. None of them is
 # exposed outside the cluster; use kubectl port-forward.
@@ -128,6 +128,93 @@ spec:
     app.kubernetes.io/name: prometheus
   ports:
     - { name: http, port: 9090, targetPort: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  labels:
+    app.kubernetes.io/name: alertmanager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: alertmanager
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:v0.28.1
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+          ports:
+            - { name: http, containerPort: 9093 }
+          readinessProbe:
+            httpGet: { path: /-/ready, port: http }
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/alertmanager, readOnly: true }
+            - { name: data, mountPath: /alertmanager }
+      volumes:
+        - name: config
+          configMap: { name: alertmanager-config }
+        - name: data
+          emptyDir: { }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+spec:
+  selector:
+    app.kubernetes.io/name: alertmanager
+  ports:
+    - { name: http, port: 9093, targetPort: http }
+---
+# Stands in for a pager and a chat channel: prints every notification
+# Alertmanager sends (kubectl logs deployment/alert-log).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-log
+  labels:
+    app.kubernetes.io/name: alert-log
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alert-log
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: alert-log
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: alert-log
+          image: mendhak/http-https-echo:36
+          ports:
+            - { name: http, containerPort: 8080 }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-log
+spec:
+  selector:
+    app.kubernetes.io/name: alert-log
+  ports:
+    - { name: http, port: 8080, targetPort: http }
 ---
 apiVersion: apps/v1
 kind: Deployment
