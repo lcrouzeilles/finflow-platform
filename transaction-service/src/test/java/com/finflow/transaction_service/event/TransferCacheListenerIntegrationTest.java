@@ -22,6 +22,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  * listener evicts synchronously ({@code evictIfPresent}), otherwise this
  * assertion races with an asynchronous {@code DEL} and fails intermittently
  * (observed in CI).
+ *
+ * <p>The cache is seeded with {@code putIfAbsent} for the same reason:
+ * {@code put} is also fire-and-forget, so its {@code SET} could land after
+ * the eviction or not yet be visible to the assertions (also observed in CI).
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -44,8 +48,8 @@ class TransferCacheListenerIntegrationTest extends AbstractIntegrationTest {
         Cache accountsCache = cacheManager.getCache("accounts");
 
         assertNotNull(accountsCache);
-        accountsCache.put(sourceAccountId, "source");
-        accountsCache.put(destinationAccountId, "destination");
+        accountsCache.putIfAbsent(sourceAccountId, "source");
+        accountsCache.putIfAbsent(destinationAccountId, "destination");
 
         TransferCompletedEvent event =
                 new TransferCompletedEvent(
@@ -74,8 +78,8 @@ class TransferCacheListenerIntegrationTest extends AbstractIntegrationTest {
         Cache accountsCache = cacheManager.getCache("accounts");
 
         assertNotNull(accountsCache);
-        accountsCache.put(sourceAccountId, "source");
-        accountsCache.put(destinationAccountId, "destination");
+        accountsCache.putIfAbsent(sourceAccountId, "source");
+        accountsCache.putIfAbsent(destinationAccountId, "destination");
 
         TransferCompletedEvent event =
                 new TransferCompletedEvent(
