@@ -287,6 +287,8 @@ gateway  http post /transfers/**
 
 Inside the service, database and Stripe work shows up too. Every JDBC connection and query is a span (`datasource-micrometer`; parameter values are never recorded, result-set fetches are left out), and the `connection` span starts when the pool is asked for a connection, so waiting for one is visible. Each Stripe call is a `stripe <operation>` span with one `stripe attempt` child per HTTP attempt: retries appear as siblings, and a call rejected by the open circuit has no attempt at all.
 
+These spans exposed that open-in-view (Spring Boot's default) kept the request's database connection, acquired by the deposit's idempotency lookup, for the whole request: one `connection` span of 1129 ms enclosed a 432 ms Stripe call, so a slow Stripe could drain the pool and stall transfers too. It is now disabled (`spring.jpa.open-in-view=false`; no entity has lazy associations). In the same scenario a deposit shows several `connection` spans of 2 to 17 ms and none around the Stripe call; `DepositRequestConnectionIntegrationTest` keeps it that way.
+
 Open Grafana → Explore → Tempo and search by service, or paste a `traceId` from a log line.
 
 **Metrics.** `/actuator/prometheus` exposes the Micrometer registry in Prometheus format: the outbox counters and backlog gauges, the Stripe circuit breaker and retry metrics (`resilience4j_*`), the reconciliation discrepancy counter, plus JVM, HTTP (with histogram buckets, for percentiles), Kafka and connection-pool metrics. It needs no token so a scraper can reach it, which is safe here because the gateway does not route `/actuator/**` and Docker Compose does not publish the transaction service's port. `/actuator/metrics` still requires a JWT.
